@@ -1,0 +1,94 @@
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--glondia-offwhite);
+  color: var(--glondia-text);
+}
+
+a {
+  color: inherit;
+}
+
+button {
+  font: inherit;
+}
+
+.page-description {
+  max-width: 54rem;
+}
+
+.page-eyebrow {
+  letter-spacing: 0.08em;
+}
+
+.logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.logo-mark {
+  width: 2.5rem;
+  height: 2.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--glondia-green-soft);
+  color: var(--glondia-green);
+  border: 1px solid rgba(25, 135, 84, 0.18);
+}
+
+.logo-copy {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+
+.logo-title {
+  font-weight: 700;
+  color: var(--glondia-black);
+}
+
+.logo-subtitle {
+  font-size: 0.8rem;
+  color: var(--glondia-muted);
+}
+
+.logo-compact .logo-subtitle {
+  font-size: 0.75rem;
+}
+
+.app-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: rgba(5, 8, 7, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.app-modal {
+  width: min(100%, 42rem);
+  border: 0;
+}
+
+.py-lg-6 {
+  padding-top: 5rem;
+  padding-bottom: 5rem;
+}
+
+@media (max-width: 991.98px) {
+  .py-lg-6 {
+    padding-top: 3rem;
+    padding-bottom: 3rem;
+  }
+}

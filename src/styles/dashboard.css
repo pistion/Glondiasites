@@ -1,0 +1,129 @@
+.dashboard-shell {
+  min-height: 100vh;
+  background: var(--glondia-offwhite);
+}
+
+.dashboard-sidebar {
+  width: 260px;
+  background: var(--glondia-black);
+  color: #ffffff;
+  flex-shrink: 0;
+}
+
+.dashboard-offcanvas {
+  width: 280px;
+}
+
+.dashboard-content {
+  min-width: 0;
+}
+
+.dashboard-topbar {
+  z-index: 1030;
+}
+
+.dashboard-main {
+  background: var(--glondia-offwhite);
+}
+
+.dashboard-panel {
+  border: 1px solid var(--glondia-border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-sm);
+}
+
+.dashboard-nav-title {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+}
+
+.dashboard-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 0.95rem;
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.82);
+  text-decoration: none;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.dashboard-nav-link:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #ffffff;
+}
+
+.dashboard-nav-link.active {
+  background: rgba(25, 135, 84, 0.2);
+  color: #ffffff;
+}
+
+.dashboard-sidebar-help {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.dashboard-search-wrapper {
+  flex: 1 1 24rem;
+  max-width: 32rem;
+}
+
+.message-menu {
+  min-width: 22rem;
+}
+
+.message-layout {
+  min-height: 38rem;
+  overflow: hidden;
+}
+
+.message-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  background: linear-gradient(180deg, rgba(248, 250, 249, 0.7), rgba(255, 255, 255, 1));
+}
+
+.message-bubble {
+  max-width: 85%;
+  padding: 1rem;
+  border-radius: 8px;
+  box-shadow: var(--shadow-sm);
+}
+
+.message-bubble-team {
+  background: #ffffff;
+  border: 1px solid var(--glondia-border);
+}
+
+.message-bubble-client {
+  background: var(--glondia-green-soft);
+  align-self: flex-end;
+}
+
+.media-card {
+  border: 1px solid var(--glondia-border);
+  border-radius: 8px;
+  padding: 1rem;
+  background: #ffffff;
+}
+
+.media-card:hover {
+  border-color: rgba(25, 135, 84, 0.3);
+}
+
+.media-surface {
+  min-height: 7rem;
+  background:
+    linear-gradient(135deg, rgba(25, 135, 84, 0.16), rgba(255, 255, 255, 0.95)),
+    linear-gradient(45deg, rgba(5, 8, 7, 0.04), transparent);
+  border: 1px solid rgba(25, 135, 84, 0.12);
+}
+
+@media (max-width: 991.98px) {
+  .message-layout {
+    min-height: auto;
+  }
+}
