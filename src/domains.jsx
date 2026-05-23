@@ -1,0 +1,1429 @@
+// domains.jsx — My domains, Domain search/purchase flow, DNS editor
+import React, { useEffect, useRef, useState as useStateD } from 'react';
+import { ICN } from './icons';
+import { GD } from './data';
+import { StatusBadge, Tabs, Stat, Badge, Empty, ToggleRow } from './components';
+import { bulkDeleteDnsRecords, checkDomainAvailability, createDnsRecord, createDomain, createRegistrarContact, deleteDnsRecord, exportZoneFile, getRegistrarOperation, getStoredAuth, importZoneFile, pullDnsFromSpaceship, pushDnsToSpaceship, registerDomain, ttlToSeconds, updateDnsRecord, updateNameservers, verifyDomain } from './api';
+import { useDnsRecords, useDomains } from './use-domains';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SKELETON ROWS
+// ─────────────────────────────────────────────────────────────────────────────
+
+function DomainSkeletonRow({ delay = 0 }) {
+  return (
+    <tr style={{ animationDelay: `${delay}s` }} className="dom-tbl-row">
+      <td><div className="row" style={{ gap: 8 }}><div className="skel skel-line" style={{ width: 14, height: 14, borderRadius: '50%', flexShrink: 0 }} /><div className="skel skel-line" style={{ width: 130 }} /></div></td>
+      <td><div className="skel skel-line" style={{ width: 80 }} /></td>
+      <td><div className="skel skel-badge" style={{ width: 40 }} /></td>
+      <td><div className="skel skel-line" style={{ width: 55 }} /></td>
+      <td><div className="skel skel-badge" /></td>
+      <td style={{ textAlign: 'right' }}><div className="skel skel-btn" style={{ marginLeft: 'auto' }} /></td>
+    </tr>
+  );
+}
+
+function DnsSkeletonRow({ delay = 0 }) {
+  return (
+    <tr style={{ animationDelay: `${delay}s` }} className="dns-anim-row">
+      <td><div className="skel skel-badge" style={{ width: 46 }} /></td>
+      <td><div className="skel skel-line" style={{ width: 70 }} /></td>
+      <td><div className="skel skel-line" style={{ width: 160 }} /></td>
+      <td><div className="skel skel-line" style={{ width: 45 }} /></td>
+      <td><div className="skel skel-badge" style={{ width: 58 }} /></td>
+      <td style={{ textAlign: 'right' }}><div className="skel skel-btn" style={{ marginLeft: 'auto' }} /></td>
+    </tr>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MY DOMAINS
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function DomainsMine({ navigate }) {
+  const { domains, loading, source, error } = useDomains();
+  const [verifyingId, setVerifyingId] = useStateD(null);
+  const connectedCount = domains.filter(d => d.linkedProject).length;
+
+  return (
+    <>
+      <div className="page-head">
+        <div>
+          <div className="page-eyebrow">Domains</div>
+          <h1>Your domains</h1>
+          <p className="sub">Manage every domain you've registered or transferred to Glondia. Link them to projects, edit DNS, set up renewals.</p>
+        </div>
+        <div className="actions">
+          <button className="btn btn-outline"><ICN.Refresh size={14} /> Transfer in</button>
+          <button className="btn btn-primary" onClick={() => navigate({ view: "domains-buy" })}>
+            <ICN.Plus size={14} /> Buy a domain
+          </button>
+        </div>
+      </div>
+
+      <div className="grid-4">
+        <Stat k="Domains" v={domains.length} d="across all TLDs" />
+        <Stat k="Renewing in 30d" v={domains.filter(d => d.auto).length} d="auto-renew protects you" />
+        <Stat k="Connected" v={connectedCount} d={domains.length ? `of ${domains.length} domain${domains.length === 1 ? '' : 's'}` : "No domains yet"} />
+        <Stat k="Total this year" v="—" d="Loaded from billing API" />
+      </div>
+
+      {source === "api" && (
+        <div className="card" style={{ padding: "10px 14px", fontSize: 13 }}>
+          <span className="row" style={{ gap: 8 }}><ICN.Server size={14} /> Connected to backend API</span>
+        </div>
+      )}
+      {error && (
+        <div className="card" style={{ padding: "10px 14px", fontSize: 13, color: "var(--text-muted)" }}>
+          Backend unavailable, showing prototype domains.
+        </div>
+      )}
+
+      <div className="card card-flush">
+        <div className="card-head">
+          <h2>All domains</h2>
+          <div className="row" style={{ gap: 8 }}>
+            <Tabs value="All" onChange={() => {}} options={["All", "Active", "Pending DNS", "Transferring"]} />
+            <button className="btn btn-sm btn-outline"><ICN.Filter size={14} /> TLD</button>
+          </div>
+        </div>
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th>Domain</th>
+              <th>Connected to</th>
+              <th>Auto-renew</th>
+              <th>Expires</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              [0,1,2,3].map(i => <DomainSkeletonRow key={i} delay={i * 0.06} />)
+            ) : domains.length === 0 ? (
+              <tr className="anim-fadeIn">
+                <td colSpan={6}>
+                  <Empty icon="Globe" title="No domains yet"
+                    body="Register or transfer a domain to get started."
+                    action={<button className="btn btn-sm btn-primary" onClick={() => navigate({ view: "domains-buy" })}><ICN.Plus size={13} /> Buy a domain</button>} />
+                </td>
+              </tr>
+            ) : domains.map((d, i) => (
+              <tr key={d.id} className="dom-tbl-row" style={{ animationDelay: `${i * 0.045}s` }}>
+                <td>
+                  <a href="#" className="row" style={{ gap: 8, color: "inherit", fontWeight: 600 }}
+                     onClick={(e) => { e.preventDefault(); navigate({ view: "dns", params: { domain: d.name } }); }}>
+                    <ICN.Globe size={15} style={{ color: "var(--accent)" }} />
+                    <span>{d.name}</span>
+                  </a>
+                </td>
+                <td>
+                  {d.linkedProject
+                    ? <a href="#" className="mono" style={{ color: "var(--accent)" }}
+                         onClick={(e) => { e.preventDefault(); navigate({ view: "hosting-detail", params: { id: d.linkedProject } }); }}>
+                        {d.linkedProjectName || d.linkedProject}
+                      </a>
+                    : <span className="faint">— Not connected</span>}
+                </td>
+                <td>{d.auto ? <Badge tone="success" dot={false}>On</Badge> : <Badge tone="muted" dot={false}>Off</Badge>}</td>
+                <td>{d.expires}</td>
+                <td><StatusBadge value={d.status} /></td>
+                <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                  {(d.rawStatus === 'pending_verification' || d.rawStatus === 'misconfigured') && (
+                    <button
+                      className="btn btn-sm btn-outline"
+                      style={{ color: 'var(--accent)', borderColor: 'var(--accent)', marginRight: 6 }}
+                      onClick={() => setVerifyingId(verifyingId === d.id ? null : d.id)}>
+                      <ICN.ShieldCheck size={14} /> Verify
+                    </button>
+                  )}
+                  <button className="btn btn-sm btn-ghost"
+                          onClick={() => navigate({ view: "dns", params: { domain: d.name } })}>
+                    <ICN.Network size={14} /> DNS
+                  </button>
+                  <button className="btn btn-sm btn-ghost"><ICN.Settings size={14} /></button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {verifyingId && (() => {
+        const d = domains.find(x => x.id === verifyingId);
+        return d ? (
+          <DomainVerifyPanel
+            domain={d}
+            onClose={() => setVerifyingId(null)}
+            onVerified={() => setVerifyingId(null)}
+          />
+        ) : null;
+      })()}
+    </>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DOMAIN VERIFY PANEL
+// ─────────────────────────────────────────────────────────────────────────────
+
+function CopyField({ value, mono = false, small = false }) {
+  const [copied, setCopied] = useStateD(false);
+  const timerRef = useRef(null);
+  const doCopy = () => {
+    navigator.clipboard?.writeText(value).catch(() => {});
+    setCopied(true);
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => setCopied(false), 1800);
+  };
+  useEffect(() => () => clearTimeout(timerRef.current), []);
+
+  return (
+    <div className="row between" style={{
+      padding: '9px 12px', background: 'var(--bg-deep)',
+      borderRadius: 'var(--r-sm)', gap: 8,
+      border: copied ? '1px solid var(--accent)' : '1px solid transparent',
+      transition: 'border-color .2s ease',
+    }}>
+      <span style={{
+        fontFamily: mono ? 'var(--mono)' : undefined,
+        fontSize: small ? 12 : 13,
+        wordBreak: 'break-all', flex: 1,
+      }}>{value}</span>
+      <button className="btn btn-icon btn-ghost" onClick={doCopy} title="Copy"
+              style={{ flexShrink: 0, color: copied ? 'var(--accent)' : undefined, transition: 'color .2s ease' }}>
+        {copied ? <ICN.Check size={13} /> : <ICN.Copy size={13} />}
+      </button>
+    </div>
+  );
+}
+
+function DomainVerifyPanel({ domain, onClose, onVerified }) {
+  const [busy, setBusy] = useStateD(false);
+  const [result, setResult] = useStateD(null);
+  const [err, setErr] = useStateD(null);
+
+  const check = async () => {
+    setBusy(true);
+    setResult(null);
+    setErr(null);
+    try {
+      const res = await verifyDomain(domain.id);
+      setResult(res);
+      if (res.verified) setTimeout(onVerified, 1800);
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const copy = (text) => navigator.clipboard?.writeText(text).catch(() => {});
+
+  return (
+    <div className="card dom-verify-wrap" style={{ borderColor: 'color-mix(in srgb, var(--accent) 35%, var(--border))' }}>
+      <div className="row between" style={{ marginBottom: 14 }}>
+        <div>
+          <h2 style={{ margin: 0 }}>
+            Verify <span className="mono" style={{ color: 'var(--accent)' }}>{domain.hostname}</span>
+          </h2>
+          <p className="muted" style={{ margin: '6px 0 0', fontSize: 13 }}>
+            Add the TXT record below to your DNS provider's zone for <b>{domain.rootDomain}</b>.
+            Propagation can take a few minutes.
+          </p>
+        </div>
+        <button className="btn btn-sm btn-ghost" onClick={onClose}><ICN.X size={14} /></button>
+      </div>
+
+      <div className="grid-2" style={{ gap: 12, marginBottom: 18 }}>
+        <div>
+          <label className="label">Type</label>
+          <div style={{ padding: '9px 12px', background: 'var(--bg-deep)', borderRadius: 'var(--r-sm)', fontFamily: 'var(--mono)', fontSize: 13 }}>TXT</div>
+        </div>
+        <div>
+          <label className="label">Host&nbsp;/&nbsp;Name</label>
+          <CopyField value="@" />
+        </div>
+        <div style={{ gridColumn: '1 / -1' }}>
+          <label className="label">Value</label>
+          <CopyField value={domain.verificationToken} mono small />
+        </div>
+      </div>
+
+      <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
+        <button className="btn btn-primary" onClick={check} disabled={busy}>
+          <span className={busy ? 'anim-spin' : ''} style={{ display: 'inline-flex' }}>
+            <ICN.Refresh size={14} />
+          </span>
+          {busy ? ' Checking…' : ' Check DNS'}
+        </button>
+        <button className="btn btn-ghost" onClick={onClose}>Dismiss</button>
+      </div>
+
+      {result && !err && (
+        <div className="dom-verify-result" style={{
+          marginTop: 14, padding: '11px 14px', borderRadius: 'var(--r-sm)', fontSize: 13,
+          background: result.verified ? 'var(--accent-soft)' : 'var(--bg-deep)',
+          border: `1px solid ${result.verified ? 'var(--accent)' : 'var(--border)'}`,
+          color: result.verified ? 'var(--accent-ink)' : 'var(--text-muted)',
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}>
+          {result.verified
+            ? <><ICN.ShieldCheck size={15} /> Domain verified! SSL certificate is being provisioned automatically.</>
+            : <><ICN.AlertCircle size={15} /> TXT record not found yet. {result.hint || 'DNS may still be propagating — try again in a few minutes.'}</>}
+        </div>
+      )}
+      {err && (
+        <div className="dom-verify-result" style={{ marginTop: 14, padding: '11px 14px', borderRadius: 'var(--r-sm)', background: 'var(--bg-deep)', color: 'var(--danger)', fontSize: 13, display: 'flex', gap: 8, alignItems: 'center' }}>
+          <ICN.AlertCircle size={14} /> {err}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BUY A DOMAIN — search + results + cart + checkout
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Default empty contact form
+const EMPTY_CONTACT = {
+  firstName: '', lastName: '', company: '',
+  email: '', phone: '',
+  address1: '', address2: '',
+  city: '', postalCode: '',
+  country: '',
+};
+
+export function DomainsBuy({ navigate }) {
+  const [step, setStep] = useStateD("search"); // search | results | checkout | done
+  const [query, setQuery] = useStateD("");
+  const [cart, setCart] = useStateD([]);
+  const [contact, setContact] = useStateD(EMPTY_CONTACT);
+  const [registering, setRegistering] = useStateD(false);
+  const [registerError, setRegisterError] = useStateD(null);
+  const [operations, setOperations] = useStateD([]); // [{ domain, operationId, status }]
+
+  const addToCart = (item) => {
+    if (cart.find(c => c.name === item.name)) return;
+    setCart([...cart, item]);
+  };
+  const removeFromCart = (name) => setCart(cart.filter(c => c.name !== name));
+  const subtotal = cart.reduce((a, c) => a + c.price, 0);
+
+  const completeOrder = async () => {
+    setRegistering(true);
+    setRegisterError(null);
+
+    try {
+      let contactId = null;
+
+      if (getStoredAuth().accessToken) {
+        // 1. Create a registrant contact in Spaceship with the form data
+        const createdContact = await createRegistrarContact({
+          firstName: contact.firstName.trim(),
+          lastName: contact.lastName.trim(),
+          company: contact.company.trim() || undefined,
+          email: contact.email.trim(),
+          phone: contact.phone.trim(),
+          address1: contact.address1.trim(),
+          address2: contact.address2.trim() || undefined,
+          city: contact.city.trim(),
+          postalCode: contact.postalCode.trim(),
+          country: contact.country.trim().toUpperCase(),
+        });
+        contactId = createdContact.id;
+
+        // 2. Register each domain in the cart using that contact
+        const ops = await Promise.all(
+          cart.map(async (item) => {
+            const result = await registerDomain({
+              hostname: item.name,
+              years: 1,
+              autoRenew: true,
+              privacyProtection: true,
+              contactId,
+            });
+            return { domain: item.name, operationId: result.operationId, status: result.status };
+          })
+        );
+        setOperations(ops);
+      }
+
+      setStep("done");
+    } catch (error) {
+      setRegisterError(error.message || 'Registration failed — please check your details and try again.');
+    } finally {
+      setRegistering(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="page-head">
+        <div>
+          <div className="page-eyebrow">Domains / Buy a domain</div>
+          <h1>{step === "checkout" ? "Checkout" : step === "done" ? "All set" : "Find your domain"}</h1>
+          {step !== "done" && <p className="sub">
+            Search across 340+ TLDs at registrar prices. WHOIS privacy and auto-renew included.
+          </p>}
+        </div>
+        {step !== "done" && (
+          <div className="actions">
+            {cart.length > 0 && step !== "checkout" && (
+              <button className="btn btn-primary" onClick={() => setStep("checkout")}>
+                <ICN.Cart size={14} /> Checkout · {cart.length} item{cart.length === 1 ? "" : "s"} · ${subtotal.toFixed(2)}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {step === "search" && (
+        <SearchPanel
+          query={query}
+          setQuery={setQuery}
+          onSearch={() => setStep("results")}
+        />
+      )}
+      {step === "results" && (
+        <SearchResults
+          query={query}
+          cart={cart}
+          addToCart={addToCart}
+          removeFromCart={removeFromCart}
+          onBack={() => setStep("search")}
+          onCheckout={() => setStep("checkout")}
+        />
+      )}
+      {step === "checkout" && (
+        <Checkout
+          cart={cart}
+          subtotal={subtotal}
+          contact={contact}
+          setContact={setContact}
+          onBack={() => setStep("results")}
+          onComplete={completeOrder}
+          busy={registering}
+          error={registerError}
+        />
+      )}
+      {step === "done" && (
+        <Done
+          cart={cart}
+          subtotal={subtotal}
+          operations={operations}
+          onNew={() => { setCart([]); setContact(EMPTY_CONTACT); setOperations([]); setStep("search"); }}
+          onManage={() => navigate({ view: "domains-mine" })}
+        />
+      )}
+    </>
+  );
+}
+
+function SearchPanel({ query, setQuery, onSearch }) {
+  return (
+    <div className="dom-hero">
+      <h2>Search for the perfect name.</h2>
+      <p>Type a name, business, or idea. We'll check availability across every TLD.</p>
+      <form className="dom-search input-group lg" onSubmit={(e) => { e.preventDefault(); if (query.trim()) onSearch(); }}>
+        <input className="input" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="e.g. emakora, kumul-shop, talimedia" autoFocus />
+        <button className="btn btn-primary" type="submit">
+          <ICN.Search size={16} /> Search
+        </button>
+      </form>
+      <div className="row" style={{ justifyContent: "center", gap: 18, marginTop: 22, color: "var(--text-muted)", fontSize: 12.5, flexWrap: "wrap" }}>
+        <span className="row" style={{ gap: 6 }}><ICN.ShieldCheck size={14} /> WHOIS privacy free</span>
+        <span className="row" style={{ gap: 6 }}><ICN.Refresh size={14} /> Free auto-renew</span>
+        <span className="row" style={{ gap: 6 }}><ICN.Zap size={14} /> One-click to your projects</span>
+        <span className="row" style={{ gap: 6 }}><ICN.Globe size={14} /> 340+ TLDs supported</span>
+      </div>
+    </div>
+  );
+}
+
+function SearchResults({ query, cart, addToCart, removeFromCart, onBack, onCheckout }) {
+  const base = (query || "yourdomain").toLowerCase().replace(/[^a-z0-9-]/g, "");
+  const [results, setResults] = useStateD(null); // null = loading, array = done
+  const [searchError, setSearchError] = useStateD(null);
+
+  useEffect(() => {
+    if (!base) return;
+    setResults(null);
+    setSearchError(null);
+
+    const tlds = GD.tldPrices.map(t => base + t.tld);
+    // Spaceship max 20 at a time — chunk if needed
+    const chunks = [];
+    for (let i = 0; i < tlds.length; i += 20) chunks.push(tlds.slice(i, i + 20));
+
+    Promise.all(chunks.map(chunk => checkDomainAvailability(chunk)))
+      .then(chunkResults => {
+        const flat = chunkResults.flat();
+        // Merge API results with our local price table
+        const merged = GD.tldPrices.map(t => {
+          const name = base + t.tld;
+          const apiResult = flat.find(d => d.domain === name);
+          const available = apiResult ? apiResult.available : true;
+          const premium = !!(apiResult?.pricing?.length);
+          const premiumPrice = apiResult?.pricing?.find(p => p.operation === 'registration')?.price;
+          return {
+            ...t,
+            name,
+            available,
+            premium,
+            price: premiumPrice != null ? premiumPrice / 100 : t.price,
+          };
+        });
+        setResults(merged);
+      })
+      .catch(err => {
+        // Fallback to synthetic results on API failure
+        setSearchError(err.message);
+        setResults(GD.tldPrices.map(t => ({
+          ...t,
+          name: base + t.tld,
+          available: t.tld !== '.com',
+          premium: t.tld === '.io',
+        })));
+      });
+  }, [base]);
+
+  const subtotal = cart.reduce((a, c) => a + c.price, 0);
+  const loading = results === null;
+  const availableCount = (results || []).filter(r => r.available).length;
+  const comResult = (results || []).find(r => r.name === base + '.com');
+  const comAvailable = comResult?.available ?? false;
+
+  return (
+    <div className="grid-side" style={{ alignItems: "flex-start" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div className="row" style={{ gap: 10 }}>
+          <button className="btn btn-outline btn-sm" onClick={onBack}><ICN.ArrowLeft size={14} /> Modify search</button>
+          <span className="muted">Results for <b className="mono" style={{ color: "var(--text)" }}>{base}</b></span>
+          {loading && <span className="row" style={{ gap: 6, color: 'var(--text-muted)', fontSize: 13 }}><span className="anim-spin" style={{ display: 'inline-flex' }}><ICN.Refresh size={13} /></span> Checking availability…</span>}
+        </div>
+
+        {searchError && (
+          <div className="card anim-fadeIn" style={{ padding: '10px 14px', fontSize: 13, color: 'var(--text-muted)' }}>
+            API unavailable — showing estimated results.
+          </div>
+        )}
+
+        {/* Featured (top match) */}
+        <div className="card" style={{ background: "linear-gradient(180deg, var(--accent-soft), transparent), var(--bg-elev)", borderColor: "color-mix(in srgb, var(--accent) 30%, var(--border))" }}>
+          <div className="row between" style={{ alignItems: "flex-start" }}>
+            <div>
+              <Badge tone={comAvailable ? "success" : "warning"}>
+                {loading ? "Checking…" : comAvailable ? "Top match" : "Taken — see alternatives"}
+              </Badge>
+              <div className="mono" style={{ fontSize: 28, fontWeight: 600, marginTop: 10 }}>
+                {base}<span style={{ color: "var(--accent)" }}>.com</span>
+              </div>
+              {!loading && !comAvailable && (
+                <p className="muted" style={{ margin: "8px 0 0", maxWidth: 50 + "ch" }}>
+                  .com is taken — but we found <b>{availableCount}</b> great alternatives below.
+                </p>
+              )}
+              {!loading && comAvailable && (
+                <p className="muted" style={{ margin: "8px 0 0" }}>
+                  Great news — <b className="mono" style={{ color: 'var(--text)' }}>{base}.com</b> is available!
+                </p>
+              )}
+            </div>
+            <div className="row" style={{ alignItems: "flex-end", flexDirection: "column", gap: 10 }}>
+              {!loading && (comAvailable
+                ? <Badge tone="success">Available</Badge>
+                : <Badge tone="danger">Taken</Badge>
+              )}
+              {!loading && comAvailable && comResult && (
+                <button className="btn btn-primary btn-sm"
+                  onClick={() => addToCart({ name: comResult.name, price: comResult.price, renewal: comResult.renewal ?? comResult.price, premium: !!comResult.premium })}>
+                  Add to cart
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="card card-flush">
+          <div className="card-head">
+            <h2>All TLDs</h2>
+            <span className="meta">{loading ? "…" : `${availableCount} available`}</span>
+          </div>
+          <div>
+            {loading
+              ? [0,1,2,3,4,5,6,7].map(i => (
+                  <div key={i} className="dom-result" style={{ animationDelay: `${i * 0.04}s` }}>
+                    <div className="skel skel-line" style={{ width: 160, height: 18 }} />
+                    <div className="skel skel-badge" style={{ width: 70 }} />
+                    <div className="skel skel-btn" />
+                  </div>
+                ))
+              : (results || []).map((r, i) => (
+                  <DomainResultRow
+                    key={r.tld}
+                    r={r}
+                    delay={i * 0.04}
+                    inCart={!!cart.find(c => c.name === r.name)}
+                    onAdd={() => addToCart({ name: r.name, price: r.price, renewal: r.renewal ?? r.price, premium: !!r.premium })}
+                    onRemove={() => removeFromCart(r.name)}
+                  />
+                ))
+            }
+          </div>
+        </div>
+
+        <div className="muted" style={{ fontSize: 12.5 }}>
+          Prices shown in USD · WHOIS privacy included free
+        </div>
+      </div>
+
+      {/* CART */}
+      <div className="card" style={{ position: "sticky", top: 80 }}>
+        <h2 style={{ marginTop: 0 }}>Your cart</h2>
+        {cart.length === 0 ? (
+          <Empty icon="Cart" title="No domains added yet" body="Tap “Add” on any available domain to start a cart." />
+        ) : (
+          <>
+            {cart.map(c => (
+              <div className="cart-row" key={c.name}>
+                <div>
+                  <div className="mono">{c.name}</div>
+                  <div className="faint" style={{ fontSize: 12 }}>1 year · renews ${c.renewal.toFixed(2)}/yr</div>
+                </div>
+                <div className="row" style={{ gap: 10 }}>
+                  <span style={{ fontFamily: "var(--serif)", fontSize: 18 }}>${c.price.toFixed(2)}</span>
+                  <button className="btn btn-icon btn-ghost" onClick={() => removeFromCart(c.name)}><ICN.X size={14} /></button>
+                </div>
+              </div>
+            ))}
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14 }}>
+              <div className="row between"><span className="muted">Subtotal</span><span>${subtotal.toFixed(2)}</span></div>
+              <div className="row between"><span className="muted">WHOIS privacy</span><span style={{ color: "var(--accent)" }}>Free</span></div>
+              <div className="row between"><span className="muted">Tax</span><span>Calculated at checkout</span></div>
+            </div>
+            <div className="row between" style={{ borderTop: "1px solid var(--border)", marginTop: 12, paddingTop: 12 }}>
+              <b>Total today</b>
+              <b style={{ fontFamily: "var(--serif)", fontSize: 24 }}>${subtotal.toFixed(2)}</b>
+            </div>
+            <button className="btn btn-primary" style={{ width: "100%", marginTop: 14 }} onClick={onCheckout}>
+              Continue to checkout <ICN.ArrowRight size={14} />
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DomainResultRow({ r, delay = 0, inCart, onAdd, onRemove }) {
+  if (!r.available) {
+    return (
+      <div className="dom-result taken" style={{ animationDelay: `${delay}s` }}>
+        <div>
+          <span className="dname">{r.name.replace(/(\.[a-z]+)$/, "")}<span className="tld">{r.tld}</span></span>
+        </div>
+        <Badge tone="danger" dot={false}>Taken</Badge>
+        <button className="btn btn-sm btn-outline">View options</button>
+      </div>
+    );
+  }
+  return (
+    <div className={`dom-result ${r.premium ? "premium" : ""}`} style={{ animationDelay: `${delay}s` }}>
+      <div>
+        <span className="dname">
+          {r.name.replace(/(\.[a-z]+)$/, "")}<span className="tld">{r.tld}</span>
+          {r.premium && <span className="premium-tag">Premium</span>}
+        </span>
+        <div className="meta" style={{ marginTop: 4 }}>
+          Renews at ${r.renewal.toFixed(2)}/yr · WHOIS privacy included
+        </div>
+      </div>
+      <div className="price">
+        ${r.price.toFixed(2)}
+        <small> /1st year</small>
+      </div>
+      {inCart
+        ? <button className="btn btn-sm btn-outline" onClick={onRemove}><ICN.Check size={14} /> In cart · Remove</button>
+        : <button className="btn btn-sm btn-primary" onClick={onAdd}><ICN.Plus size={14} /> Add</button>}
+    </div>
+  );
+}
+
+// Country list (ISO 3166-1 alpha-2 codes) — common ones first
+const COUNTRIES = [
+  { code: 'PG', label: 'Papua New Guinea' },
+  { code: 'AU', label: 'Australia' },
+  { code: 'NZ', label: 'New Zealand' },
+  { code: 'US', label: 'United States' },
+  { code: 'GB', label: 'United Kingdom' },
+  { code: 'CA', label: 'Canada' },
+  { code: 'SB', label: 'Solomon Islands' },
+  { code: 'FJ', label: 'Fiji' },
+  { code: 'TO', label: 'Tonga' },
+  { code: 'WS', label: 'Samoa' },
+  { code: 'VU', label: 'Vanuatu' },
+  { code: 'DE', label: 'Germany' },
+  { code: 'FR', label: 'France' },
+  { code: 'SG', label: 'Singapore' },
+  { code: 'JP', label: 'Japan' },
+  { code: 'IN', label: 'India' },
+  { code: 'PH', label: 'Philippines' },
+  { code: 'ID', label: 'Indonesia' },
+  { code: 'ZA', label: 'South Africa' },
+];
+
+function Checkout({ cart, subtotal, contact, setContact, onBack, onComplete, busy, error }) {
+  const [pay, setPay] = useStateD("card");
+  const set = (field) => (e) => setContact(prev => ({ ...prev, [field]: e.target.value }));
+
+  // Basic required-field validation before submit
+  const required = ['firstName', 'lastName', 'email', 'phone', 'address1', 'city', 'postalCode', 'country'];
+  const missing = required.filter(f => !contact[f].trim());
+  const phoneOk = /^\+\d{1,3}\.\d{4,14}$/.test(contact.phone.trim());
+  const canSubmit = cart.length > 0 && missing.length === 0 && phoneOk;
+
+  return (
+    <div className="grid-side" style={{ alignItems: "flex-start" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div className="card">
+          <div className="row between" style={{ marginBottom: 16 }}>
+            <h2 style={{ margin: 0 }}>1. Registrant information</h2>
+            <Badge tone="info" dot={false}>WHOIS privacy hides these details publicly</Badge>
+          </div>
+          <div className="grid-2">
+            <div>
+              <label className="label">First name <span style={{ color: 'var(--danger)' }}>*</span></label>
+              <input className="input" placeholder="Jane" value={contact.firstName} onChange={set('firstName')} />
+            </div>
+            <div>
+              <label className="label">Last name <span style={{ color: 'var(--danger)' }}>*</span></label>
+              <input className="input" placeholder="Smith" value={contact.lastName} onChange={set('lastName')} />
+            </div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <label className="label">Organization <span className="faint">(optional)</span></label>
+              <input className="input" placeholder="Acme Inc." value={contact.company} onChange={set('company')} />
+            </div>
+            <div>
+              <label className="label">Email <span style={{ color: 'var(--danger)' }}>*</span></label>
+              <input className="input" type="email" placeholder="you@example.com" value={contact.email} onChange={set('email')} />
+            </div>
+            <div>
+              <label className="label">
+                Phone <span style={{ color: 'var(--danger)' }}>*</span>
+                <span className="faint" style={{ fontWeight: 400, marginLeft: 4 }}>e.g. +1.5550001234</span>
+              </label>
+              <input
+                className="input mono"
+                type="tel"
+                placeholder="+675.70001234"
+                value={contact.phone}
+                onChange={set('phone')}
+                style={{ borderColor: contact.phone && !phoneOk ? 'var(--danger)' : undefined }}
+              />
+              {contact.phone && !phoneOk && (
+                <span style={{ color: 'var(--danger)', fontSize: 11.5, marginTop: 4, display: 'block' }}>
+                  Format: +countrycode.number — e.g. +675.70001234
+                </span>
+              )}
+            </div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <label className="label">Street address <span style={{ color: 'var(--danger)' }}>*</span></label>
+              <input className="input" placeholder="123 Main St" value={contact.address1} onChange={set('address1')} />
+            </div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <label className="label">Address line 2 <span className="faint">(optional)</span></label>
+              <input className="input" placeholder="Suite 4, PO Box, etc." value={contact.address2} onChange={set('address2')} />
+            </div>
+            <div>
+              <label className="label">City <span style={{ color: 'var(--danger)' }}>*</span></label>
+              <input className="input" placeholder="Port Moresby" value={contact.city} onChange={set('city')} />
+            </div>
+            <div>
+              <label className="label">Postal / ZIP code <span style={{ color: 'var(--danger)' }}>*</span></label>
+              <input className="input mono" placeholder="121" value={contact.postalCode} onChange={set('postalCode')} />
+            </div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <label className="label">Country <span style={{ color: 'var(--danger)' }}>*</span></label>
+              <select className="select" value={contact.country} onChange={set('country')}>
+                <option value="">Select country…</option>
+                {COUNTRIES.map(c => (
+                  <option key={c.code} value={c.code}>{c.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div className="card">
+          <h2 style={{ marginTop: 0, marginBottom: 16 }}>2. Payment</h2>
+          <div className="row" style={{ gap: 10, marginBottom: 18 }}>
+            <PayPill icon="CreditCard" label="Card" active={pay === "card"} onClick={() => setPay("card")} />
+            <PayPill icon="Cube" label="Bank transfer" active={pay === "bank"} onClick={() => setPay("bank")} />
+          </div>
+          {pay === "card" && (
+            <div className="grid-2">
+              <div style={{ gridColumn: "1 / -1" }}><label className="label">Card number</label><input className="input mono" placeholder="1234 5678 9012 3456" /></div>
+              <div><label className="label">Expiry</label><input className="input mono" placeholder="MM / YY" /></div>
+              <div><label className="label">CVC</label><input className="input mono" placeholder="123" /></div>
+              <div style={{ gridColumn: "1 / -1" }}><label className="label">Name on card</label><input className="input" placeholder="Name on card" /></div>
+            </div>
+          )}
+          {pay === "bank" && (
+            <p className="muted">We'll email payment instructions for bank transfer in USD or PGK. Domain registration begins once the transfer clears.</p>
+          )}
+        </div>
+
+        <div className="card">
+          <h2 style={{ marginTop: 0, marginBottom: 16 }}>3. Setup options</h2>
+          <ToggleRow label="Enable auto-renew" sub="We'll renew before expiry and email a receipt." defaultOn />
+          <ToggleRow label="Enable WHOIS privacy" sub="Hide your registrant details from public lookups. Free with every domain." defaultOn />
+          <ToggleRow label="Use Glondia nameservers" sub="Recommended — gives you DNS management inside this workspace." defaultOn />
+          <ToggleRow label="Forward www to apex" sub="Redirect www.yourdomain to yourdomain automatically." defaultOn />
+        </div>
+
+        <div className="row" style={{ gap: 10 }}>
+          <button className="btn btn-outline" onClick={onBack}><ICN.ArrowLeft size={14} /> Back to results</button>
+        </div>
+      </div>
+
+      {/* Sticky summary */}
+      <div className="card" style={{ position: "sticky", top: 80 }}>
+        <h2 style={{ marginTop: 0 }}>Order summary</h2>
+        {cart.length === 0
+          ? <Empty icon="Cart" title="Your cart is empty" />
+          : (
+            <>
+              {cart.map(c => (
+                <div className="cart-row" key={c.name}>
+                  <div>
+                    <div className="mono">{c.name}</div>
+                    <div className="faint" style={{ fontSize: 12 }}>1 year</div>
+                  </div>
+                  <span style={{ fontFamily: "var(--serif)", fontSize: 18 }}>${c.price.toFixed(2)}</span>
+                </div>
+              ))}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14 }}>
+                <div className="row between"><span className="muted">Subtotal</span><span>${subtotal.toFixed(2)}</span></div>
+                <div className="row between"><span className="muted">WHOIS privacy</span><span style={{ color: "var(--accent)" }}>Free</span></div>
+                <div className="row between"><span className="muted">Tax (10% GST)</span><span>${(subtotal * 0.1).toFixed(2)}</span></div>
+              </div>
+              <div className="row between" style={{ borderTop: "1px solid var(--border)", marginTop: 12, paddingTop: 12 }}>
+                <b>Total today</b>
+                <b style={{ fontFamily: "var(--serif)", fontSize: 24 }}>${(subtotal * 1.1).toFixed(2)}</b>
+              </div>
+              {error && (
+                <div style={{ color: "var(--danger)", fontSize: 13, marginTop: 12, padding: '10px 12px', background: 'var(--bg-deep)', borderRadius: 'var(--r-sm)', border: '1px solid var(--danger)' }}>
+                  <ICN.AlertCircle size={14} style={{ marginRight: 6, verticalAlign: 'middle' }} />
+                  {error}
+                </div>
+              )}
+              {!canSubmit && !busy && (
+                <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>
+                  {missing.length > 0 ? 'Fill in all required fields above.' : !phoneOk ? 'Fix the phone number format.' : ''}
+                </p>
+              )}
+              <button className="btn btn-primary" style={{ width: "100%", marginTop: 14 }} onClick={onComplete} disabled={busy || !canSubmit}>
+                <span className={busy ? 'anim-spin' : ''} style={{ display: 'inline-flex' }}><ICN.ShieldCheck size={14} /></span>
+                {busy ? " Registering…" : " Complete order"}
+              </button>
+              <p className="muted" style={{ fontSize: 11.5, marginTop: 12, textAlign: "center" }}>
+                Registrations are final once submitted. By continuing you agree to the registrar policy.
+              </p>
+            </>
+          )}
+      </div>
+    </div>
+  );
+}
+
+function PayPill({ icon, label, active, onClick }) {
+  const Icon = ICN[icon];
+  return (
+    <button
+      onClick={onClick}
+      className="row"
+      style={{
+        gap: 8, padding: "10px 14px",
+        borderRadius: "var(--r-sm)",
+        border: `1.5px solid ${active ? "var(--accent)" : "var(--border-strong)"}`,
+        background: active ? "var(--accent-soft)" : "var(--bg-elev)",
+        color: active ? "var(--accent-ink)" : "var(--text)",
+        fontWeight: 500,
+        fontSize: 13.5,
+      }}>
+      <Icon size={15} /> {label}
+    </button>
+  );
+}
+
+function Done({ cart, subtotal, operations, onNew, onManage }) {
+  const [opStatuses, setOpStatuses] = useStateD(operations); // [{ domain, operationId, status }]
+  const [polling, setPolling] = useStateD(false);
+  const [pollError, setPollError] = useStateD(null);
+
+  // Keep local op statuses in sync if parent updates operations
+  useEffect(() => { setOpStatuses(operations); }, [operations]);
+
+  const hasPending = opStatuses.some(op => op.status === 'pending');
+  const allDone = opStatuses.length > 0 && opStatuses.every(op => op.status === 'success');
+
+  const pollStatuses = async () => {
+    setPolling(true);
+    setPollError(null);
+    try {
+      const updated = await Promise.all(
+        opStatuses.map(async (op) => {
+          if (!op.operationId || op.status === 'success' || op.status === 'failed') return op;
+          try {
+            const result = await getRegistrarOperation(op.operationId);
+            return { ...op, status: result.status };
+          } catch {
+            return op; // keep previous status on individual poll failure
+          }
+        })
+      );
+      setOpStatuses(updated);
+    } catch (e) {
+      setPollError(e.message);
+    } finally {
+      setPolling(false);
+    }
+  };
+
+  const opBadge = (status) => {
+    if (status === 'success') return <Badge tone="success">Registered</Badge>;
+    if (status === 'failed') return <Badge tone="danger">Failed</Badge>;
+    return <Badge tone="muted">Processing…</Badge>;
+  };
+
+  // If no operations (e.g. not logged in), show optimistic success
+  const isOptimistic = opStatuses.length === 0;
+
+  return (
+    <div className="card anim-slideUp" style={{ textAlign: "center", padding: 48 }}>
+      <div className="anim-pop" style={{ width: 64, height: 64, borderRadius: 999, background: allDone || isOptimistic ? "var(--accent-soft)" : "var(--bg-deep)", color: allDone || isOptimistic ? "var(--accent)" : "var(--text-muted)", display: "inline-flex", alignItems: "center", justifyContent: "center", marginBottom: 18 }}>
+        {allDone || isOptimistic ? <ICN.ShieldCheck size={28} /> : <ICN.Refresh size={28} />}
+      </div>
+
+      {isOptimistic ? (
+        <h2 style={{ fontFamily: "var(--serif)", fontWeight: 400, fontSize: 36, letterSpacing: "-0.015em", margin: 0 }}>
+          Your domains are registered.
+        </h2>
+      ) : allDone ? (
+        <h2 style={{ fontFamily: "var(--serif)", fontWeight: 400, fontSize: 36, letterSpacing: "-0.015em", margin: 0 }}>
+          Registration complete!
+        </h2>
+      ) : (
+        <h2 style={{ fontFamily: "var(--serif)", fontWeight: 400, fontSize: 36, letterSpacing: "-0.015em", margin: 0 }}>
+          Registration submitted.
+        </h2>
+      )}
+
+      <p className="muted" style={{ maxWidth: 60 + "ch", margin: "12px auto 0" }}>
+        {isOptimistic || allDone
+          ? `We've issued the registration${cart.length > 1 ? "s" : ""} and queued DNS setup. SSL certificates will be issued automatically once the domain${cart.length > 1 ? "s point" : " points"} at a project.`
+          : "Spaceship is processing your registration asynchronously — this usually takes a minute. Click \"Check status\" to refresh."}
+      </p>
+
+      <div style={{ maxWidth: 480, margin: "32px auto 0", textAlign: "left" }}>
+        {opStatuses.length > 0
+          ? opStatuses.map(op => (
+              <div className="row between" key={op.domain} style={{ padding: "12px 0", borderBottom: "1px solid var(--border)" }}>
+                <div>
+                  <span className="mono">{op.domain}</span>
+                  {op.operationId && (
+                    <div className="faint mono" style={{ fontSize: 11.5, marginTop: 3 }}>op: {op.operationId}</div>
+                  )}
+                </div>
+                {opBadge(op.status)}
+              </div>
+            ))
+          : cart.map(c => (
+              <div className="row between" key={c.name} style={{ padding: "12px 0", borderBottom: "1px solid var(--border)" }}>
+                <span className="mono">{c.name}</span>
+                <Badge tone="success">Registered</Badge>
+              </div>
+            ))
+        }
+
+        <div className="row between" style={{ paddingTop: 16, fontWeight: 600 }}>
+          <span>Order total</span>
+          <span style={{ fontFamily: "var(--serif)", fontSize: 22 }}>${(subtotal * 1.1).toFixed(2)}</span>
+        </div>
+      </div>
+
+      {pollError && (
+        <p style={{ color: 'var(--danger)', fontSize: 13, marginTop: 14 }}>{pollError}</p>
+      )}
+
+      <div className="row" style={{ justifyContent: "center", gap: 10, marginTop: 28 }}>
+        <button className="btn btn-outline" onClick={onNew}>Buy another</button>
+        {hasPending && (
+          <button className="btn btn-outline" onClick={pollStatuses} disabled={polling}>
+            <span className={polling ? 'anim-spin' : ''} style={{ display: 'inline-flex' }}><ICN.Refresh size={14} /></span>
+            {polling ? ' Checking…' : ' Check status'}
+          </button>
+        )}
+        <button className="btn btn-primary" onClick={onManage}>Go to my domains <ICN.ArrowRight size={14} /></button>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DNS EDITOR
+// ─────────────────────────────────────────────────────────────────────────────
+
+const DNS_TABS = ["All", "A / AAAA", "CNAME", "MX", "TXT"];
+
+function filterByTab(records, tab) {
+  if (tab === "All") return records;
+  if (tab === "A / AAAA") return records.filter(r => r.type === "A" || r.type === "AAAA");
+  return records.filter(r => r.type === tab);
+}
+
+export function DnsEditor({ domain = "", navigate }) {
+  const { domain: managedDomain, records: loadedRecords, loading, source, error } = useDnsRecords(domain);
+  const [records, setRecords] = useStateD(GD.dnsRecords);
+  const [editing, setEditing] = useStateD(null);
+  const [adding, setAdding] = useStateD(false);
+  const [actionError, setActionError] = useStateD(null);
+  const [activeTab, setActiveTab] = useStateD("All");
+  const [selected, setSelected] = useStateD(new Set());
+  const [showImport, setShowImport] = useStateD(false);
+  const [exportBusy, setExportBusy] = useStateD(false);
+  const [bulkDeleting, setBulkDeleting] = useStateD(false);
+  const [syncPushBusy, setSyncPushBusy] = useStateD(false);
+  const [syncPullBusy, setSyncPullBusy] = useStateD(false);
+  const [syncMsg, setSyncMsg] = useStateD(null);
+
+  useEffect(() => { setRecords(loadedRecords); }, [loadedRecords]);
+
+  const domainLabel = managedDomain?.name || domain || 'your domain';
+  const canMutate = source === "api" && managedDomain?.id;
+  const filtered = filterByTab(records, activeTab);
+  const allSelected = filtered.length > 0 && filtered.every(r => selected.has(r.id));
+
+  const toggleSelect = (id) => setSelected(prev => {
+    const n = new Set(prev);
+    n.has(id) ? n.delete(id) : n.add(id);
+    return n;
+  });
+
+  const toggleAll = () => {
+    if (allSelected) setSelected(new Set());
+    else setSelected(new Set(filtered.map(r => r.id)));
+  };
+
+  const handleTabChange = (tab) => { setActiveTab(tab); setSelected(new Set()); };
+
+  const update = async (id, patch) => {
+    setActionError(null);
+    if (!canMutate) { setRecords(records.map(r => r.id === id ? { ...r, ...patch } : r)); return; }
+    try {
+      await updateDnsRecord(managedDomain.id, id, dnsPayloadFromRecord(patch));
+      setEditing(null);
+    } catch (e) { setActionError(e.message); }
+  };
+
+  const remove = async (id) => {
+    setActionError(null);
+    if (!canMutate) { setRecords(records.filter(r => r.id !== id)); return; }
+    try { await deleteDnsRecord(managedDomain.id, id); }
+    catch (e) { setActionError(e.message); }
+  };
+
+  const add = async (rec) => {
+    setActionError(null);
+    if (!canMutate) {
+      setRecords([...records, { ...rec, id: Math.max(0, ...records.map(r => Number(r.id) || 0)) + 1 }]);
+      return;
+    }
+    try { await createDnsRecord(managedDomain.id, dnsPayloadFromRecord(rec)); setAdding(false); }
+    catch (e) { setActionError(e.message); }
+  };
+
+  const handleBulkDelete = async () => {
+    if (!canMutate || selected.size === 0) return;
+    setBulkDeleting(true);
+    setActionError(null);
+    try {
+      await bulkDeleteDnsRecords(managedDomain.id, [...selected]);
+      setSelected(new Set());
+    } catch (e) { setActionError(e.message); }
+    finally { setBulkDeleting(false); }
+  };
+
+  const handleExport = async () => {
+    if (!canMutate) return;
+    setExportBusy(true);
+    try {
+      const { hostname, content } = await exportZoneFile(managedDomain.id);
+      const blob = new Blob([content], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `${hostname}.zone`; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 3000);
+    } catch (e) { setActionError(e.message); }
+    finally { setExportBusy(false); }
+  };
+
+  const handlePushToSpaceship = async () => {
+    if (!canMutate) return;
+    setSyncPushBusy(true);
+    setSyncMsg(null);
+    setActionError(null);
+    try {
+      const { pushed } = await pushDnsToSpaceship(managedDomain.id);
+      setSyncMsg(`✓ Pushed ${pushed} record${pushed === 1 ? '' : 's'} to Spaceship`);
+      setTimeout(() => setSyncMsg(null), 4000);
+    } catch (e) { setActionError(e.message); }
+    finally { setSyncPushBusy(false); }
+  };
+
+  const handlePullFromSpaceship = async () => {
+    if (!canMutate) return;
+    setSyncPullBusy(true);
+    setSyncMsg(null);
+    setActionError(null);
+    try {
+      const { pulled } = await pullDnsFromSpaceship(managedDomain.id);
+      setSyncMsg(`✓ Pulled ${pulled} record${pulled === 1 ? '' : 's'} from Spaceship`);
+      setTimeout(() => setSyncMsg(null), 4000);
+    } catch (e) { setActionError(e.message); }
+    finally { setSyncPullBusy(false); }
+  };
+
+  return (
+    <>
+      <div className="page-head">
+        <div>
+          <a className="page-eyebrow" href="#" onClick={(e) => { e.preventDefault(); navigate({ view: "domains-mine" }); }}>
+            ← Domains
+          </a>
+          <h1 style={{ marginTop: 8 }}>
+            DNS for <span className="mono" style={{ fontSize: 32, color: "var(--accent)" }}>{domainLabel}</span>
+          </h1>
+          <p className="sub">Records propagate globally in seconds. Glondia handles SSL automatically for any host pointing at a project.</p>
+        </div>
+        <div className="actions">
+          <button className="btn btn-outline" onClick={() => setShowImport(v => !v)}>
+            <ICN.Code size={14} /> Import zone file
+          </button>
+          {canMutate && (
+            <>
+              <button className="btn btn-outline" onClick={handlePullFromSpaceship} disabled={syncPullBusy} title="Pull DNS records from Spaceship registrar into local DB">
+                <span className={syncPullBusy ? 'anim-spin' : ''} style={{ display: 'inline-flex' }}><ICN.ArrowLeft size={14} /></span>
+                {syncPullBusy ? ' Pulling…' : ' Pull from registrar'}
+              </button>
+              <button className="btn btn-outline" onClick={handlePushToSpaceship} disabled={syncPushBusy} title="Push local DNS records to Spaceship registrar">
+                <span className={syncPushBusy ? 'anim-spin' : ''} style={{ display: 'inline-flex' }}><ICN.ArrowRight size={14} /></span>
+                {syncPushBusy ? ' Pushing…' : ' Push to registrar'}
+              </button>
+            </>
+          )}
+          {canMutate && (
+            <button className="btn btn-outline" onClick={handleExport} disabled={exportBusy}>
+              <span className={exportBusy ? 'anim-spin' : ''} style={{ display: 'inline-flex' }}><ICN.ArrowRight size={14} /></span>
+              {exportBusy ? ' Exporting…' : ' Export zone'}
+            </button>
+          )}
+          <button className="btn btn-primary" onClick={() => setAdding(true)}>
+            <ICN.Plus size={14} /> Add record
+          </button>
+        </div>
+      </div>
+
+      <div className="grid-4">
+        <Stat k="Records" v={records.length} d="across all types" />
+        <Stat k="Nameservers" v="Glondia" d="ns1.glondia.app · ns2.glondia.app" />
+        <Stat k="DNSSEC" v="Enabled" d="signed with KSK + ZSK" />
+        <Stat k="Filtered" v={filtered.length} d={activeTab === "All" ? "showing all" : `type: ${activeTab}`} />
+      </div>
+
+      {syncMsg && (
+        <div className="card anim-slideUp" style={{ padding: "10px 14px", fontSize: 13, color: "var(--success, #22c55e)", borderColor: "var(--success, #22c55e)" }}>
+          <span className="row" style={{ gap: 8 }}><ICN.CheckCircle size={14} /> {syncMsg}</span>
+        </div>
+      )}
+
+      {source === "api" && (
+        <div className="card anim-fadeIn" style={{ padding: "10px 14px", fontSize: 13 }}>
+          <span className="row" style={{ gap: 8 }}><ICN.Server size={14} /> Connected to backend DNS API</span>
+        </div>
+      )}
+      {(error || actionError) && (
+        <div className="card anim-fadeIn" style={{ padding: "10px 14px", fontSize: 13, color: actionError ? "var(--danger)" : "var(--text-muted)" }}>
+          {actionError || "Backend unavailable, showing prototype DNS records."}
+        </div>
+      )}
+
+      {showImport && (
+        <ImportZonePanel
+          domainId={managedDomain?.id}
+          canMutate={!!canMutate}
+          onClose={() => setShowImport(false)}
+          onDone={() => setShowImport(false)}
+        />
+      )}
+
+      <div className="card card-flush">
+        <div className="card-head">
+          <div className="row" style={{ gap: 12, alignItems: 'center' }}>
+            <h2 style={{ margin: 0 }}>Records</h2>
+            {selected.size > 0 && (
+              <button className="btn btn-sm btn-outline anim-fadeIn"
+                      style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }}
+                      onClick={handleBulkDelete} disabled={bulkDeleting}>
+                <span className={bulkDeleting ? 'anim-spin' : ''} style={{ display: 'inline-flex' }}><ICN.Trash size={13} /></span>
+                {bulkDeleting ? ' Deleting…' : ` Delete ${selected.size}`}
+              </button>
+            )}
+          </div>
+          <div className="row" style={{ gap: 8 }}>
+            <Tabs value={activeTab} onChange={handleTabChange} options={DNS_TABS} />
+          </div>
+        </div>
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th style={{ width: 32 }}>
+                <button className={`chk ${allSelected ? 'on' : ''}`} onClick={toggleAll}>
+                  {allSelected && <ICN.Check size={11} stroke={3} />}
+                </button>
+              </th>
+              <th style={{ width: 80 }}>Type</th>
+              <th style={{ width: 160 }}>Host</th>
+              <th>Value</th>
+              <th style={{ width: 85 }}>TTL</th>
+              <th style={{ width: 80 }}>Status</th>
+              <th style={{ width: 75 }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              [0,1,2,3,4].map(i => <DnsSkeletonRow key={i} delay={i * 0.05} />)
+            ) : filtered.length === 0 && !adding ? (
+              <tr className="anim-fadeIn">
+                <td colSpan={7}>
+                  <Empty icon="Network" title={activeTab === "All" ? "No DNS records" : `No ${activeTab} records`}
+                    body="Add records to control how this domain resolves." />
+                </td>
+              </tr>
+            ) : filtered.map((r, i) => editing === r.id ? (
+              <EditingRecord key={r.id} r={r}
+                onSave={(patch) => { update(r.id, patch); setEditing(null); }}
+                onCancel={() => setEditing(null)} />
+            ) : (
+              <tr key={r.id} className="dns-anim-row"
+                  style={{ animationDelay: `${i * 0.04}s`, background: selected.has(r.id) ? 'var(--accent-soft)' : undefined }}>
+                <td>
+                  <button className={`chk ${selected.has(r.id) ? 'on' : ''}`} onClick={() => toggleSelect(r.id)}>
+                    {selected.has(r.id) && <ICN.Check size={11} stroke={3} />}
+                  </button>
+                </td>
+                <td><Badge tone={r.type === "MX" ? "info" : r.type === "TXT" ? "muted" : "success"} dot={false}>{r.type}</Badge></td>
+                <td className="mono" style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.host}</td>
+                <td className="mono" style={{ wordBreak: "break-all", color: "var(--text)", maxWidth: 280 }}>{r.value}</td>
+                <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>{r.ttl}</td>
+                <td><DnsStatusBadge status={r.status} /></td>
+                <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                  <button className="btn btn-sm btn-ghost" onClick={() => { setEditing(r.id); setAdding(false); }}><ICN.Edit size={14} /></button>
+                  <button className="btn btn-sm btn-ghost" onClick={() => remove(r.id)} style={{ color: "var(--danger)" }}><ICN.Trash size={14} /></button>
+                </td>
+              </tr>
+            ))}
+            {adding && <NewRecord onSave={(rec) => { add(rec); setAdding(false); }} onCancel={() => setAdding(false)} />}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="grid-2">
+        <div className="card">
+          <h2 style={{ marginTop: 0 }}>Nameservers</h2>
+          <p className="muted" style={{ marginTop: 0 }}>Set these at your registrar if you transferred only DNS to Glondia.</p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {["ns1.glondia.app", "ns2.glondia.app", "ns3.glondia.app", "ns4.glondia.app"].map(n => (
+              <div key={n} className="row between" style={{ padding: "10px 14px", background: "var(--bg-deep)", borderRadius: "var(--r-sm)" }}>
+                <span className="mono">{n}</span>
+                <button className="btn btn-sm btn-ghost" onClick={() => navigator.clipboard?.writeText(n)}><ICN.Copy size={14} /></button>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="card">
+          <h2 style={{ marginTop: 0 }}>Email forwarding</h2>
+          <p className="muted" style={{ marginTop: 0 }}>Forward custom email addresses to an inbox you already use. Aliases work right after MX records propagate.</p>
+          <Empty icon="Mail" title="No forwarding addresses"
+            body={`Add aliases like hello@${domainLabel} to forward mail to any inbox.`}
+            action={<button className="btn btn-outline btn-sm"><ICN.Plus size={14} /> Add forwarding address</button>} />
+        </div>
+      </div>
+    </>
+  );
+}
+
+function DnsStatusBadge({ status }) {
+  if (!status || status === 'active') return <Badge tone="success" dot={false}>Active</Badge>;
+  if (status === 'pending') return <Badge tone="muted" dot={false}>Pending</Badge>;
+  if (status === 'failed') return <Badge tone="danger" dot={false}>Failed</Badge>;
+  return <Badge tone="muted" dot={false}>{status}</Badge>;
+}
+
+function ImportZonePanel({ domainId, canMutate, onClose, onDone }) {
+  const [content, setContent] = useStateD('');
+  const [overwrite, setOverwrite] = useStateD(false);
+  const [busy, setBusy] = useStateD(false);
+  const [result, setResult] = useStateD(null);
+  const [err, setErr] = useStateD(null);
+
+  const handleImport = async () => {
+    if (!content.trim()) return;
+    setBusy(true); setResult(null); setErr(null);
+    try {
+      const r = await importZoneFile(domainId, content, overwrite);
+      setResult(r);
+    } catch (e) { setErr(e.message); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="card dom-verify-wrap" style={{ borderColor: 'color-mix(in srgb, var(--accent) 25%, var(--border))' }}>
+      <div className="row between" style={{ marginBottom: 14 }}>
+        <div>
+          <h2 style={{ margin: 0 }}>Import zone file</h2>
+          <p className="muted" style={{ margin: '5px 0 0', fontSize: 13 }}>
+            Paste a BIND-format zone file. Supports A, AAAA, CNAME, MX, TXT, NS, SRV, CAA records.
+          </p>
+        </div>
+        <button className="btn btn-sm btn-ghost" onClick={onClose}><ICN.X size={14} /></button>
+      </div>
+
+      <textarea
+        className="input"
+        style={{ fontFamily: 'var(--mono)', fontSize: 12, minHeight: 200, resize: 'vertical', marginBottom: 12 }}
+        placeholder={`; Example zone file\n$ORIGIN example.com.\n$TTL 3600\n@ IN A 93.184.216.34\nwww IN CNAME @\n@ IN MX 10 mail.example.com.\n@ IN TXT "v=spf1 ~all"`}
+        value={content}
+        onChange={(e) => setContent(e.target.value)}
+        spellCheck={false}
+      />
+
+      <div className="row between" style={{ flexWrap: 'wrap', gap: 12 }}>
+        <label className="row" style={{ gap: 8, fontSize: 13, cursor: 'pointer' }}>
+          <button className={`chk ${overwrite ? 'on' : ''}`} onClick={() => setOverwrite(v => !v)}>
+            {overwrite && <ICN.Check size={11} stroke={3} />}
+          </button>
+          <span>Delete all existing records before import</span>
+        </label>
+        <div className="row" style={{ gap: 8 }}>
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" onClick={handleImport}
+                  disabled={busy || !content.trim() || !canMutate}>
+            <span className={busy ? 'anim-spin' : ''} style={{ display: 'inline-flex' }}><ICN.ArrowRight size={14} /></span>
+            {busy ? ' Importing…' : ' Import records'}
+          </button>
+        </div>
+      </div>
+
+      {!canMutate && (
+        <p className="muted" style={{ marginTop: 10, fontSize: 12 }}>Connect to the backend API to import records.</p>
+      )}
+
+      {result && (
+        <div className="dom-verify-result" style={{
+          marginTop: 14, padding: '12px 16px', borderRadius: 'var(--r-sm)', fontSize: 13,
+          background: result.imported > 0 ? 'var(--accent-soft)' : 'var(--bg-deep)',
+          border: `1px solid ${result.imported > 0 ? 'var(--accent)' : 'var(--border)'}`,
+          color: result.imported > 0 ? 'var(--accent-ink)' : 'var(--text-muted)',
+        }}>
+          <div className="row" style={{ gap: 8, marginBottom: result.warnings?.length ? 8 : 0 }}>
+            <ICN.CheckCircle size={15} />
+            <span>Imported <b>{result.imported}</b> record{result.imported !== 1 ? 's' : ''}
+              {result.skipped > 0 ? `, ${result.skipped} skipped` : ''}.
+            </span>
+            {result.imported > 0 && (
+              <button className="btn btn-sm btn-ghost" style={{ marginLeft: 'auto' }} onClick={onDone}>Done</button>
+            )}
+          </div>
+          {result.warnings?.length > 0 && (
+            <ul style={{ margin: '4px 0 0 20px', padding: 0, fontSize: 12, color: 'var(--text-muted)' }}>
+              {result.warnings.map((w, i) => <li key={i}>{w}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
+      {err && (
+        <div className="dom-verify-result" style={{ marginTop: 14, padding: '12px 16px', borderRadius: 'var(--r-sm)', background: 'var(--bg-deep)', color: 'var(--danger)', fontSize: 13 }}>
+          <ICN.AlertCircle size={14} /> {err}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EditingRecord({ r, onSave, onCancel }) {
+  const [draft, setDraft] = useStateD({ ...r });
+  return (
+    <tr className="anim-slideDown" style={{ background: "var(--accent-soft)" }}>
+      <td></td>
+      <td>
+        <select className="select" style={{ height: 32 }} value={draft.type} onChange={(e) => setDraft({ ...draft, type: e.target.value })}>
+          {["A", "AAAA", "CNAME", "MX", "TXT", "SRV", "CAA"].map(t => <option key={t}>{t}</option>)}
+        </select>
+      </td>
+      <td><input className="input mono" style={{ height: 32 }} value={draft.host} onChange={(e) => setDraft({ ...draft, host: e.target.value })} /></td>
+      <td><input className="input mono" style={{ height: 32 }} value={draft.value} onChange={(e) => setDraft({ ...draft, value: e.target.value })} /></td>
+      <td>
+        <select className="select" style={{ height: 32 }} value={draft.ttl} onChange={(e) => setDraft({ ...draft, ttl: e.target.value })}>
+          <option>Auto</option><option>5 min</option><option>1 hour</option><option>1 day</option>
+        </select>
+      </td>
+      <td></td>
+      <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+        <button className="btn btn-sm btn-primary" onClick={() => onSave(draft)}>Save</button>
+        <button className="btn btn-sm btn-ghost" onClick={onCancel}>Cancel</button>
+      </td>
+    </tr>
+  );
+}
+
+function NewRecord({ onSave, onCancel }) {
+  const [draft, setDraft] = useStateD({ type: "A", host: "@", value: "", ttl: "Auto", proxy: false });
+  return (
+    <tr className="anim-slideDown" style={{ background: "var(--bg-deep)" }}>
+      <td></td>
+      <td>
+        <select className="select" style={{ height: 32 }} value={draft.type} onChange={(e) => setDraft({ ...draft, type: e.target.value })}>
+          {["A", "AAAA", "CNAME", "MX", "TXT", "SRV", "CAA"].map(t => <option key={t}>{t}</option>)}
+        </select>
+      </td>
+      <td><input className="input mono" style={{ height: 32 }} value={draft.host} onChange={(e) => setDraft({ ...draft, host: e.target.value })} placeholder="@ or sub" /></td>
+      <td><input className="input mono" style={{ height: 32 }} value={draft.value} onChange={(e) => setDraft({ ...draft, value: e.target.value })} placeholder="76.76.84.21" /></td>
+      <td>
+        <select className="select" style={{ height: 32 }} value={draft.ttl} onChange={(e) => setDraft({ ...draft, ttl: e.target.value })}>
+          <option>Auto</option><option>5 min</option><option>1 hour</option><option>1 day</option>
+        </select>
+      </td>
+      <td></td>
+      <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+        <button className="btn btn-sm btn-primary" onClick={() => onSave(draft)} disabled={!draft.value}>Add</button>
+        <button className="btn btn-sm btn-ghost" onClick={onCancel}>Cancel</button>
+      </td>
+    </tr>
+  );
+}
+
+function dnsPayloadFromRecord(record) {
+  return {
+    type: record.type,
+    name: record.host || '@',
+    value: record.value,
+    ttl: ttlToSeconds(record.ttl),
+    priority: record.priority ?? undefined,
+    proxied: !!record.proxy,
+  };
+}

@@ -1,6 +1,14 @@
-node_modules
-dist
-.npm-cache
+node_modules/
+.npm-cache/
+dist/
 .env
-.env.*
+.env.local
 .DS_Store
+coverage/
+backend/dist/
+backend/node_modules/
+backend/.env
+backend/coverage/
+
+# Claude Code — machine-local settings (paths, local permissions)
+.claude/settings.local.json

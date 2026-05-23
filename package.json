@@ -1,30 +1,24 @@
 {
-  "name": "glondia-react-vite",
+  "name": "glondiasites",
   "private": true,
   "version": "0.0.0",
+  "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:localhost": "vite --mode localhost",
-    "dev:global": "vite --mode global",
-    "dev:session": "vite --mode session",
     "build": "vite build",
-    "preview": "vite preview --host 0.0.0.0",
-    "start": "vite preview --host 0.0.0.0"
+    "preview": "vite preview",
+    "backend:dev": "npm --prefix backend run start:dev",
+    "backend:build": "npm --prefix backend run build",
+    "backend:test": "npm --prefix backend run test"
   },
   "dependencies": {
-    "@popperjs/core": "^2.11.8",
-    "bootstrap": "^5.3.8",
-    "lucide-react": "1.14.0",
-    "react": "19.2.5",
-    "react-dom": "19.2.5",
-    "react-router-dom": "^7.15.0"
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "6.0.1",
-    "vite": "8.0.10"
-  },
-  "engines": {
-    "node": ">=22.0.0 <23.0.0"
-  },
-  "packageManager": "npm@10.9.0"
+    "@types/react": "^18.3.1",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.2.1",
+    "vite": "^5.2.0"
+  }
 }
