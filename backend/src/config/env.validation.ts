@@ -3,6 +3,8 @@ import { z } from 'zod';
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   APP_NAME: z.string().default('glondia-backend'),
+  // Render injects PORT; APP_PORT is the local dev override
+  PORT: z.coerce.number().int().positive().optional(),
   APP_PORT: z.coerce.number().int().positive().default(4000),
   APP_URL: z.string().url().default('http://localhost:4000'),
   FRONTEND_URL: z.string().url().default('http://localhost:5173'),
@@ -44,6 +46,10 @@ const envSchema = z.object({
   SMTP_USER: z.string().default(''),
   SMTP_PASS: z.string().default(''),
   EMAIL_FROM: z.string().default('no-reply@glondia.com'),
+
+  // CORS — comma-separated extra allowed origins beyond FRONTEND_URL + localhost
+  // Example: https://glondiasites.onrender.com,https://www.glondia.app
+  CORS_ORIGINS: z.string().default(''),
 
   // Rate limiting
   RATE_LIMIT_TTL_SECONDS: z.coerce.number().int().positive().default(60),

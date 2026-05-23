@@ -1,10 +1,145 @@
+# Render Blueprint — full Glondia Sites deployment.
+# Deploy at: https://dashboard.render.com/blueprints → New Blueprint Instance
+# After first deploy, go to each service's Environment tab to fill in sync:false values.
+# Docs: https://render.com/docs/blueprint-spec
+
 services:
+
+  # ── Backend API (NestJS) ────────────────────────────────────────────────────
   - type: web
-    name: glondia-react-vite
+    name: glondia-backend
+    runtime: node
+    region: oregon
+    plan: starter
+    rootDir: backend
+    buildCommand: npm ci && npx prisma generate && npm run build
+    startCommand: npx prisma migrate deploy && node dist/main
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Render assigns port 10000 to web services
+      - key: APP_PORT
+        value: 10000
+      - key: APP_NAME
+        value: glondia-backend
+
+      # Set these to your actual Render service URLs after first deploy
+      - key: APP_URL
+        value: https://glondia-backend.onrender.com
+      - key: API_BASE_URL
+        value: https://glondia-backend.onrender.com/api/v1
+      - key: FRONTEND_URL
+        value: https://glondiasites.onrender.com
+      # Comma-separated list — add custom domains here too
+      - key: CORS_ORIGINS
+        value: https://glondiasites.onrender.com,https://glondia-backend.onrender.com
+
+      # ── Database (auto-linked from Render Postgres) ─────────────────────
+      - key: DATABASE_URL
+        fromDatabase:
+          name: glondia-db
+          property: connectionString
+
+      # ── Redis (auto-linked from Render Redis) ───────────────────────────
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: glondia-redis
+          property: connectionString
+
+      # ── Auth secrets — Render auto-generates secure random values ────────
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: FIELD_ENCRYPTION_KEY
+        generateValue: true
+      - key: ACCESS_TOKEN_TTL_MINUTES
+        value: 15
+      - key: REFRESH_TOKEN_TTL_DAYS
+        value: 30
+
+      # ── Render integration ───────────────────────────────────────────────
+      # Set manually in Render dashboard after deploy
+      - key: RENDER_API_KEY
+        sync: false
+      - key: RENDER_API_BASE_URL
+        value: https://api.render.com/v1
+
+      # ── Spaceship registrar ──────────────────────────────────────────────
+      - key: SPACESHIP_API_KEY
+        sync: false
+      - key: SPACESHIP_API_SECRET
+        sync: false
+
+      # ── Email ─────────────────────────────────────────────────────────────
+      - key: EMAIL_PROVIDER
+        value: log
+      - key: EMAIL_FROM
+        value: no-reply@glondia.app
+      - key: RESEND_API_KEY
+        sync: false
+
+      # ── Stripe ────────────────────────────────────────────────────────────
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+
+      # ── S3 object storage ─────────────────────────────────────────────────
+      - key: S3_ENDPOINT
+        value: https://s3.amazonaws.com
+      - key: S3_REGION
+        value: ap-southeast-2
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: S3_ASSETS_BUCKET
+        value: glondia-assets
+      - key: S3_ARTIFACTS_BUCKET
+        value: glondia-artifacts
+      - key: S3_PUBLIC_URL
+        sync: false
+
+      # ── Rate limiting ─────────────────────────────────────────────────────
+      - key: RATE_LIMIT_TTL_SECONDS
+        value: 60
+      - key: RATE_LIMIT_MAX_REQUESTS
+        value: 200
+      - key: LOG_LEVEL
+        value: info
+
+  # ── Frontend (React/Vite static site) ───────────────────────────────────────
+  - type: web
+    name: glondiasites
     runtime: static
+    region: oregon
+    plan: starter
     buildCommand: npm ci && npm run build
     staticPublishPath: ./dist
     routes:
+      # SPA fallback — all routes serve index.html
       - type: rewrite
         source: /*
         destination: /index.html
+    envVars:
+      # Points the React app at the deployed backend
+      - key: VITE_API_BASE_URL
+        value: https://glondia-backend.onrender.com/api/v1
+
+  # ── Redis ────────────────────────────────────────────────────────────────────
+  - type: redis
+    name: glondia-redis
+    region: oregon
+    plan: starter
+    maxmemoryPolicy: noeviction
+
+# ── PostgreSQL ───────────────────────────────────────────────────────────────────
+databases:
+  - name: glondia-db
+    region: oregon
+    plan: starter
+    databaseName: glondia
+    user: glondia

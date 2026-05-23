@@ -20,9 +20,25 @@ async function bootstrap() {
     type: VersioningType.URI,
     defaultVersion: '1'
   });
+  // Build the allowed-origin list from CORS_ORIGINS (comma-separated) or fall back
+  // to FRONTEND_URL.  localhost entries are always included for local dev.
+  const frontendUrl = config.get<string>('FRONTEND_URL', 'http://localhost:5173');
+  const rawCorsOrigins = config.get<string>('CORS_ORIGINS', '');
+  const allowedOrigins = new Set<string>([
+    'http://localhost:5173',
+    'http://localhost:4000',
+    frontendUrl,
+    ...rawCorsOrigins.split(',').map(s => s.trim()).filter(Boolean),
+  ]);
   app.enableCors({
-    origin: config.getOrThrow<string>('app.frontendUrl'),
-    credentials: true
+    origin: (origin, callback) => {
+      // Allow requests with no origin (server-to-server, curl, Swagger UI)
+      if (!origin || allowedOrigins.has(origin)) return callback(null, true);
+      callback(new Error(`CORS: origin not allowed — ${origin}`));
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Organization-Id', 'X-Request-Id'],
   });
   app.use(helmet());
   app.use(compression());
