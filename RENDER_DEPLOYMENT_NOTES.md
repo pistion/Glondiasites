@@ -27,8 +27,8 @@ Use the root `render.yaml`:
 Use Web Service.
 
 - Root Directory: blank
-- Build Command: `npm run build:render`
-- Start Command: `npm start`
+- Build Command: `npm ci && npm --prefix backend ci --cache /tmp/.npm-cache && npm --prefix backend run prisma:generate && npm run build && npm --prefix backend run build`
+- Start Command: `node server/render-single-service.mjs`
 - Health Check Path: `/api/v1/health`
 - Node Version: `24.14.1`
 
@@ -49,6 +49,13 @@ Use Web Service.
 - `RENDER_API_KEY` if using Render deploy triggers
 
 Optional provider keys can stay blank until their feature is used.
+
+If Render still logs `Missing script: "start"`, the service is not using this blueprint or latest commit. In Render, open the service settings and confirm:
+
+- Branch is `main`
+- Root Directory is blank
+- Start Command is `node server/render-single-service.mjs`
+- Latest deployed commit is at least `d5cd203`
 
 ## Custom domain
 
