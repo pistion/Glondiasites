@@ -26,7 +26,7 @@ const BillingController = {
   },
 
   createCheckoutSession: async (req, res) => {
-    res.created({ url: "https://stripe.com/checkout/..." });
+    res.created({ url: "https://www.paypal.com/checkoutnow?token=placeholder" });
   }
 };
 

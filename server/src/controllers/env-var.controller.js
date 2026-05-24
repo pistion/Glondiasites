@@ -6,7 +6,7 @@
 const EnvVarController = {
   listEnvVars: async (req, res) => {
     res.ok([
-      { id: "ev_1", key: "DATABASE_URL", value: "postgres://••••••••", env: ["Production"] }
+      { id: "ev_1", key: "NODE_ENV", value: "production", env: ["Production"] }
     ]);
   },
 

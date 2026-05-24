@@ -1,3 +1,13 @@
+/**
+ * DEPRECATED — NOT USED IN THE ACTIVE RENDER DEPLOY.
+ *
+ * This file was an earlier attempt at a single-service approach that spawned the
+ * NestJS/Prisma backend as a child process alongside the static file server.
+ * It has been replaced by server/src/server.js (Express API + Vite static serving).
+ *
+ * `npm start` → server/src/server.js
+ * Do NOT change startCommand to reference this file.
+ */
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { extname, join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';

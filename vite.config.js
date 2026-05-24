@@ -9,7 +9,7 @@ export default defineConfig({
     // In dev, proxy /api to the local NestJS backend so CORS is never an issue.
     proxy: {
       '/api': {
-        target: 'http://localhost:4000',
+        target: 'http://localhost:3001',
         changeOrigin: true,
       },
     },
