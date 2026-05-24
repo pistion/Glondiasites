@@ -1,7 +1,7 @@
 import { createReadStream, existsSync, mkdirSync, statSync } from 'node:fs';
 import { readdir, readFile, rm } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import express from 'express';
 import cors from 'cors';
@@ -43,6 +43,7 @@ const distDir = join(rootDir, 'dist');
 const dataDir = resolve(process.env.DATA_DIR || join(rootDir, '.glondia-data'));
 const sandboxRoot = join(dataDir, 'sandboxes');
 mkdirSync(sandboxRoot, { recursive: true });
+const sandboxProcesses = new Map();
 
 const mimeTypes = {
   '.html': 'text/html; charset=utf-8',
@@ -110,10 +111,30 @@ app.post('/api/render/deploy', async (req, res, next) => {
   }
 });
 
+app.get('/api/render/settings', async (req, res, next) => {
+  try {
+    res.json(getRenderSettings());
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/render/deploys', async (req, res, next) => {
+  try {
+    const result = await listRenderDeploys();
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.use('/sandbox/:siteId', (req, res, next) => {
   const siteId = sanitizeId(req.params.siteId);
   const sandboxDist = resolve(sandboxRoot, siteId, 'dist');
-  if (!siteId || !sandboxDist.startsWith(sandboxRoot) || !existsSync(sandboxDist)) return next();
+  if (!siteId || !sandboxDist.startsWith(sandboxRoot)) return next();
+  const runtime = sandboxProcesses.get(siteId);
+  if (runtime?.port) return proxySandboxRuntime(req, res, next, runtime.port, siteId);
+  if (!existsSync(sandboxDist)) return next();
   return express.static(sandboxDist, {
     index: 'index.html',
     fallthrough: true,
@@ -193,8 +214,9 @@ function normalizeGithubRepo(owner, repo) {
 
 async function runStep(command, args, options = {}) {
   const started = Date.now();
+  const executable = process.platform === 'win32' && command === 'npm' ? 'npm.cmd' : command;
   try {
-    const { stdout, stderr } = await execFileAsync(command, args, {
+    const { stdout, stderr } = await execFileAsync(executable, args, {
       timeout: options.timeout || 120000,
       maxBuffer: 1024 * 1024 * 4,
       cwd: options.cwd,
@@ -224,24 +246,25 @@ async function runStep(command, args, options = {}) {
 
 async function importGithubSandbox(input) {
   const repo = parseGithubRepo(input.repoUrl);
-  if (!repo) {
-    const error = new Error('Enter a valid GitHub repository URL.');
-    error.status = 400;
-    throw error;
-  }
-
   const branch = String(input.branch || 'main').trim() || 'main';
-  const siteId = sanitizeId(input.siteId || `${repo.owner}-${repo.repo}`.toLowerCase());
+  const fallbackName = repo ? `${repo.owner}-${repo.repo}`.toLowerCase() : 'invalid-repository';
+  const siteId = sanitizeId(input.siteId || fallbackName);
   const sandboxDir = resolve(sandboxRoot, siteId);
   const repoDir = join(sandboxDir, 'repo');
   const outputDirectory = String(input.outputDirectory || 'dist').replace(/^[/\\]+/, '') || 'dist';
   const distOut = resolve(sandboxDir, 'dist');
   const logs = [];
 
-  await rm(sandboxDir, { recursive: true, force: true });
-  mkdirSync(sandboxDir, { recursive: true });
-
   try {
+    if (!repo) {
+      const error = new Error('Enter a valid GitHub repository URL.');
+      error.status = 400;
+      throw error;
+    }
+
+    await rm(sandboxDir, { recursive: true, force: true });
+    mkdirSync(sandboxDir, { recursive: true });
+
     logs.push(await runStep('git', ['clone', '--depth', '1', '--branch', branch, repo.url, repoDir], { timeout: 180000 }));
 
     const packageJsonPath = join(repoDir, 'package.json');
@@ -253,10 +276,27 @@ async function importGithubSandbox(input) {
       }
     }
 
+    const packageJson = existsSync(packageJsonPath) ? JSON.parse(await readFile(packageJsonPath, 'utf8')) : null;
     const candidateOutput = resolve(repoDir, outputDirectory);
     const sourceDir = existsSync(join(candidateOutput, 'index.html')) ? candidateOutput : repoDir;
     if (!existsSync(join(sourceDir, 'index.html'))) {
-      const error = new Error(`Build completed, but no index.html was found in ${outputDirectory}.`);
+      if (packageJson?.scripts?.start) {
+        const runtimePort = 4100 + Math.floor(Math.random() * 1000);
+        startSandboxRuntime(siteId, repoDir, runtimePort);
+        logs.push({ command: `PORT=${runtimePort} npm start`, ok: true, durationMs: 0, output: 'Started repository server and attached it to the sandbox viewer.' });
+        return {
+          siteId,
+          repo: repo.fullName,
+          branch,
+          previewUrl: `/sandbox/${siteId}/`,
+          outputDirectory: 'runtime',
+          status: 'ready',
+          mode: 'runtime',
+          files: await listSandboxFiles(repoDir),
+          logs,
+        };
+      }
+      const error = new Error(`No static index.html found in ${outputDirectory}, and package.json has no start script for runtime preview.`);
       error.status = 422;
       throw error;
     }
@@ -277,7 +317,7 @@ async function importGithubSandbox(input) {
   } catch (error) {
     return {
       siteId,
-      repo: repo.fullName,
+      repo: repo?.fullName || null,
       branch,
       previewUrl: null,
       outputDirectory,
@@ -301,6 +341,57 @@ async function listSandboxFiles(dir, prefix = '') {
     else files.push({ path: relative });
   }
   return files;
+}
+
+function startSandboxRuntime(siteId, cwd, port) {
+  const existing = sandboxProcesses.get(siteId);
+  if (existing?.child) existing.child.kill();
+  const command = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  const child = spawn(command, ['start'], {
+    cwd,
+    env: {
+      ...process.env,
+      PORT: String(port),
+      NODE_ENV: 'development',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+  });
+  const runtime = { child, port, logs: [] };
+  child.stdout?.on('data', (chunk) => runtime.logs.push(String(chunk).trim()));
+  child.stderr?.on('data', (chunk) => runtime.logs.push(String(chunk).trim()));
+  child.on('exit', (code, signal) => {
+    runtime.exited = { code, signal };
+  });
+  sandboxProcesses.set(siteId, runtime);
+  return runtime;
+}
+
+async function proxySandboxRuntime(req, res, next, port, siteId) {
+  try {
+    const prefix = `/sandbox/${siteId}`;
+    const original = req.originalUrl || req.url || '/';
+    const targetPath = original.startsWith(prefix) ? original.slice(prefix.length) || '/' : req.url || '/';
+    const target = `http://127.0.0.1:${port}${targetPath}`;
+    const response = await fetch(target, {
+      method: req.method,
+      headers: {
+        accept: req.headers.accept || '*/*',
+        'user-agent': req.headers['user-agent'] || 'GlondiaSandbox',
+      },
+      redirect: 'manual',
+    });
+    res.status(response.status);
+    response.headers.forEach((value, key) => {
+      if (!['content-encoding', 'transfer-encoding', 'connection'].includes(key.toLowerCase())) {
+        res.setHeader(key, value);
+      }
+    });
+    const buffer = Buffer.from(await response.arrayBuffer());
+    res.send(buffer);
+  } catch (error) {
+    next(error);
+  }
 }
 
 async function triggerRenderDeploy(input = {}) {
@@ -366,6 +457,41 @@ async function triggerRenderDeploy(input = {}) {
     serviceId,
     deploy: body,
   };
+}
+
+function getRenderSettings(input = {}) {
+  const serviceId = process.env.RENDER_SERVICE_ID || input.serviceId || input.renderServiceId || null;
+  return {
+    provider: 'render',
+    configured: !!(process.env.RENDER_DEPLOY_HOOK_URL || (process.env.RENDER_API_KEY && serviceId)),
+    apiKeyPresent: !!process.env.RENDER_API_KEY,
+    deployHookPresent: !!process.env.RENDER_DEPLOY_HOOK_URL,
+    serviceId,
+    serviceUrl: serviceId ? `https://dashboard.render.com/web/${serviceId}` : null,
+    required: process.env.RENDER_DEPLOY_HOOK_URL ? [] : ['RENDER_API_KEY', 'RENDER_SERVICE_ID'].filter((key) => key === 'RENDER_API_KEY' ? !process.env.RENDER_API_KEY : !serviceId),
+  };
+}
+
+async function listRenderDeploys(input = {}) {
+  const serviceId = process.env.RENDER_SERVICE_ID || input.serviceId || input.renderServiceId;
+  const apiKey = process.env.RENDER_API_KEY;
+  if (!apiKey || !serviceId) {
+    return { status: 'configuration_required', deploys: [], settings: getRenderSettings(input) };
+  }
+
+  const response = await fetch(`https://api.render.com/v1/services/${encodeURIComponent(serviceId)}/deploys?limit=5`, {
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      Accept: 'application/json',
+    },
+  });
+  const bodyText = await response.text();
+  let body;
+  try { body = bodyText ? JSON.parse(bodyText) : []; } catch { body = []; }
+  if (!response.ok) {
+    return { status: 'failed', deploys: [], settings: getRenderSettings(input), error: body?.message || bodyText || `Render returned ${response.status}.` };
+  }
+  return { status: 'ok', deploys: Array.isArray(body) ? body : [], settings: getRenderSettings(input) };
 }
 
 // ── Error handler ────────────────────────────────────────────────────────────

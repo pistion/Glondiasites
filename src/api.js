@@ -502,6 +502,34 @@ export async function triggerRenderDeploy(input = {}) {
   }
 }
 
+export async function getRenderSettings() {
+  try {
+    const response = await fetch('/api/render/settings');
+    if (!response.ok) throw new Error(`Render settings returned ${response.status}.`);
+    return response.json();
+  } catch (error) {
+    return {
+      provider: 'render',
+      configured: false,
+      apiKeyPresent: false,
+      deployHookPresent: false,
+      serviceId: null,
+      required: ['RENDER_API_KEY', 'RENDER_SERVICE_ID'],
+      error: error.message,
+    };
+  }
+}
+
+export async function listRenderDeploys() {
+  try {
+    const response = await fetch('/api/render/deploys');
+    if (!response.ok) throw new Error(`Render deploy list returned ${response.status}.`);
+    return response.json();
+  } catch (error) {
+    return { status: 'unavailable', deploys: [], error: error.message };
+  }
+}
+
 export async function uploadBuilderSitePackage(file) {
   const db = readLocalDb();
   const site = makeBuilderSite({
@@ -554,6 +582,7 @@ export async function importBuilderSiteFromGithub(input) {
       _sandboxStatus: sandbox.status,
       _sandboxPreviewUrl: sandbox.previewUrl,
       _sandboxOutputDirectory: sandbox.outputDirectory,
+      _sandboxMode: sandbox.mode || 'static',
       _sandboxFiles: sandbox.files || [],
       _sandboxLogs: sandbox.logs,
       _sandboxError: sandbox.error,

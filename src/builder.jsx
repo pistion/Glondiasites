@@ -11,6 +11,7 @@ import {
   saveBuilderPage, publishBuilderSite,
   createBuilderPage, deleteBuilderPage, listPageVersions,
   uploadBuilderSitePackage, importBuilderSiteFromGithub,
+  getRenderSettings, listRenderDeploys, triggerRenderDeploy,
 } from './api';
 import { STOREFRONT_TEMPLATES, StorefrontPreview, StorefrontModal } from './storefront-templates';
 
@@ -1007,10 +1008,43 @@ function ImportedGithubWorkspace({ content, site }) {
   const selectedContent = contents[selectedPath] || '';
   const summary = content._githubSummary || {};
   const loadedPaths = Object.keys(contents);
+  const [renderStatus, setRenderStatus] = useStateB({ loading: true, settings: null, deploys: [], error: null });
+  const [deploying, setDeploying] = useStateB(false);
+  const [deployMsg, setDeployMsg] = useStateB(null);
 
   React.useEffect(() => {
     if (!selectedPath && firstPath) setSelectedPath(firstPath);
   }, [firstPath, selectedPath]);
+
+  const refreshRenderStatus = React.useCallback(() => {
+    setRenderStatus((current) => ({ ...current, loading: true, error: null }));
+    Promise.all([getRenderSettings(), listRenderDeploys()])
+      .then(([settings, deploys]) => {
+        setRenderStatus({
+          loading: false,
+          settings,
+          deploys: deploys?.deploys || [],
+          error: deploys?.error || settings?.error || null,
+        });
+      })
+      .catch((error) => setRenderStatus({ loading: false, settings: null, deploys: [], error: error.message }));
+  }, []);
+
+  React.useEffect(() => {
+    refreshRenderStatus();
+  }, [refreshRenderStatus]);
+
+  const handleRenderDeploy = async () => {
+    setDeploying(true);
+    setDeployMsg(null);
+    try {
+      const result = await triggerRenderDeploy({ siteId: site?.id });
+      setDeployMsg(result.message || (result.status === 'triggered' ? 'Render deploy triggered.' : 'Render configuration needs attention.'));
+      refreshRenderStatus();
+    } finally {
+      setDeploying(false);
+    }
+  };
 
   return (
     <div className="bld-form">
@@ -1024,7 +1058,41 @@ function ImportedGithubWorkspace({ content, site }) {
 
       <div className="grid-2" style={{ gap: 10 }}>
         <ImportMetric label="Package" value={summary.hasPackageJson ? "Found" : "Missing"} detail="package.json" />
-        <ImportMetric label="Sandbox" value={content._sandboxStatus === 'ready' ? "Ready" : content._sandboxStatus === 'failed' ? "Failed" : "Building"} detail={content._sandboxOutputDirectory || 'dist'} />
+        <ImportMetric label="Sandbox" value={content._sandboxStatus === 'ready' ? "Ready" : content._sandboxStatus === 'failed' ? "Failed" : "Building"} detail={content._sandboxMode === 'runtime' ? 'Runtime server' : content._sandboxOutputDirectory || 'dist'} />
+      </div>
+
+      <div>
+        <div className="label">Render deployment</div>
+        <div style={{ background: "var(--bg-deep)", border: "1px solid var(--border)", borderRadius: "var(--r-sm)", padding: 14, display: "flex", flexDirection: "column", gap: 12 }}>
+          <div className="row between" style={{ gap: 12 }}>
+            <div>
+              <div style={{ fontWeight: 700 }}>Render settings</div>
+              <div className="muted" style={{ fontSize: 13 }}>
+                {renderStatus.loading
+                  ? 'Checking Render configuration...'
+                  : renderStatus.settings?.configured
+                    ? `Connected${renderStatus.settings.serviceId ? ` to ${renderStatus.settings.serviceId}` : ' with deploy hook'}`
+                    : 'Needs RENDER_DEPLOY_HOOK_URL or RENDER_API_KEY + RENDER_SERVICE_ID'}
+              </div>
+            </div>
+            <Badge tone={renderStatus.settings?.configured ? "success" : "warn"} dot={false}>
+              {renderStatus.settings?.configured ? "Ready" : "Setup"}
+            </Badge>
+          </div>
+          <div className="kv" style={{ gridTemplateColumns: "120px 1fr" }}>
+            <dt>API key</dt><dd>{renderStatus.settings?.apiKeyPresent ? 'Configured' : 'Missing'}</dd>
+            <dt>Service ID</dt><dd className="mono">{renderStatus.settings?.serviceId || 'Missing'}</dd>
+            <dt>Deploy hook</dt><dd>{renderStatus.settings?.deployHookPresent ? 'Configured' : 'Optional'}</dd>
+          </div>
+          {renderStatus.error && <div style={{ color: "var(--warning)", fontSize: 13 }}>{renderStatus.error}</div>}
+          {deployMsg && <div style={{ color: "var(--accent)", fontSize: 13 }}>{deployMsg}</div>}
+          <div className="row" style={{ gap: 8, justifyContent: "flex-end" }}>
+            <button className="btn btn-sm btn-outline" onClick={refreshRenderStatus} disabled={renderStatus.loading}>Refresh</button>
+            <button className="btn btn-sm btn-primary" onClick={handleRenderDeploy} disabled={deploying}>
+              <ICN.Rocket size={13} /> {deploying ? "Triggering..." : "Deploy to Render"}
+            </button>
+          </div>
+        </div>
       </div>
 
       <div>
@@ -1093,6 +1161,7 @@ function ImportedGithubPreview({ content }) {
   const sandboxPreviewUrl = content._sandboxPreviewUrl || '';
   const entryHtml = content._githubEntryHtml || '';
   const hasPreview = sandboxPreviewUrl || entryHtml.trim().length > 0;
+  const logs = Array.isArray(content._sandboxLogs) ? content._sandboxLogs : [];
   return (
     <div className="bld-preview-frame">
       {hasPreview ? (
@@ -1105,18 +1174,29 @@ function ImportedGithubPreview({ content }) {
         />
       ) : (
         <div style={{ padding: 42 }}>
-          <div className="eyebrow">GitHub source imported</div>
+          <div className="eyebrow">Website viewer configuration</div>
           <h1 style={{ fontFamily: "var(--serif)", fontWeight: 400, fontSize: 42, margin: "10px 0 14px" }}>{content._repository}</h1>
           <p style={{ color: "var(--text-muted)", maxWidth: 620, lineHeight: 1.6 }}>
-            The repository files are loaded on the left. The sandbox build has not produced a preview yet, so check the build logs and output directory.
+            The source has been imported. The viewer is waiting for a successful sandbox build or Render deploy before it can display the live website.
           </p>
           <div className="card" style={{ marginTop: 22, padding: 16 }}>
             <div className="kv" style={{ gridTemplateColumns: "130px 1fr" }}>
               <dt>Branch</dt><dd className="mono">{content._branch || 'main'}</dd>
               <dt>Status</dt><dd className="mono">{content._sandboxStatus || 'not started'}</dd>
+              <dt>Mode</dt><dd className="mono">{content._sandboxMode || 'static'}</dd>
               <dt>Output</dt><dd className="mono">{content._sandboxOutputDirectory || 'dist'}</dd>
               <dt>Error</dt><dd>{content._sandboxError || 'None'}</dd>
             </div>
+          </div>
+          <div className="term" style={{ marginTop: 18, textAlign: "left", maxHeight: 260 }}>
+            {logs.length ? logs.map((log, index) => (
+              <div key={index}>
+                <span className="ts">{log.ok ? 'ok' : 'check'}</span> <span className={log.ok ? "ok" : "warn"}>{log.command || 'sandbox'}</span>
+                {log.output && <pre className="mono" style={{ whiteSpace: "pre-wrap", margin: "6px 0 12px", color: "var(--text-muted)" }}>{log.output}</pre>}
+              </div>
+            )) : (
+              <div><span className="ts">idle</span> <span className="info">Re-import the repository to run clone, install, and build.</span></div>
+            )}
           </div>
         </div>
       )}
