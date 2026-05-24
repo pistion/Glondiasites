@@ -266,17 +266,35 @@ export class DeploymentProcessor implements OnModuleInit, OnModuleDestroy {
       : `https://github.com/${owner}/${repo}.git`;
   }
 
-  private execShell(command: string, cwd: string): Promise<void> {
+  /**
+   * Run a shell command and wait for it to finish.
+   * @param timeoutMs  Kill the process and reject after this many ms (default 5 min).
+   *                   Set to 0 to disable the timeout (not recommended).
+   */
+  private execShell(command: string, cwd: string, timeoutMs = 300_000): Promise<void> {
     return new Promise((resolve, reject) => {
       const child = spawn(command, [], { cwd, shell: true, stdio: 'pipe' });
       const stderr: string[] = [];
+
+      // Safety valve: kill the child if it runs longer than `timeoutMs`.
+      const timer = timeoutMs > 0
+        ? setTimeout(() => {
+            child.kill('SIGKILL');
+            reject(new Error(
+              `Command timed out after ${timeoutMs / 1000}s — ` +
+              `possible network hang or credential issue: ${command}`
+            ));
+          }, timeoutMs)
+        : null;
+
       child.stderr?.on('data', (d: Buffer) => stderr.push(d.toString()));
-      child.on('close', (code) =>
+      child.on('close', (code) => {
+        if (timer) clearTimeout(timer);
         code === 0
           ? resolve()
-          : reject(new Error(`Command failed (exit ${code}): ${command}\n${stderr.join('')}`))
-      );
-      child.on('error', reject);
+          : reject(new Error(`Command failed (exit ${code}): ${command}\n${stderr.join('')}`));
+      });
+      child.on('error', (err) => { if (timer) clearTimeout(timer); reject(err); });
     });
   }
 

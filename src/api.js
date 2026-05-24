@@ -34,7 +34,13 @@ export function clearAuthSession() {
   window.dispatchEvent(new CustomEvent(AUTH_CHANGED_EVENT));
 }
 
-export async function apiRequest(path, options = {}) {
+// How many times to retry on a pure network failure (ERR_CONNECTION_REFUSED,
+// ERR_NETWORK_CHANGED, etc.) before giving up.  Each attempt waits 2 s longer
+// than the previous one.  This handles Render cold-starts gracefully.
+const NETWORK_RETRY_LIMIT = 3;
+const NETWORK_RETRY_BASE_MS = 2_000;
+
+export async function apiRequest(path, options = {}, _attempt = 0) {
   const { accessToken, organizationId } = getStoredAuth();
   const headers = new Headers(options.headers);
   headers.set("Accept", "application/json");
@@ -49,10 +55,27 @@ export async function apiRequest(path, options = {}) {
     headers.set("X-Organization-Id", organizationId);
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...options,
-    headers,
-  });
+  let response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
+  } catch (networkError) {
+    // fetch() only throws on a genuine network failure (connection refused,
+    // DNS failure, offline).  HTTP 4xx/5xx are NOT thrown — they reach the
+    // ok-check below.
+    if (_attempt < NETWORK_RETRY_LIMIT) {
+      const delay = NETWORK_RETRY_BASE_MS * (_attempt + 1);
+      console.warn(`[api] Network error on ${path} (attempt ${_attempt + 1}/${NETWORK_RETRY_LIMIT}), retrying in ${delay}ms…`, networkError.message);
+      await new Promise(r => setTimeout(r, delay));
+      return apiRequest(path, options, _attempt + 1);
+    }
+    // All retries exhausted — surface a friendly message.
+    throw new Error(
+      'Cannot reach the server. ' +
+      'If you just deployed, the backend may still be starting up — wait 30 s and refresh. ' +
+      `(${networkError.message})`
+    );
+  }
+
   const payload = await response.json().catch(() => ({}));
 
   if (!response.ok) {

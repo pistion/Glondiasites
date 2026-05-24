@@ -23,6 +23,7 @@ const envSchema = z.object({
 
   // S3 / object storage
   S3_ENDPOINT: z.string().url().default('http://localhost:9000'),
+  S3_REGION: z.string().default('ap-southeast-2'),
   S3_ACCESS_KEY_ID: z.string().min(1).default('glondia_minio'),
   S3_SECRET_ACCESS_KEY: z.string().min(1).default('glondia_minio_secret'),
   S3_ARTIFACTS_BUCKET: z.string().min(1).default('glondia-artifacts'),
