@@ -12,7 +12,10 @@ services:
     region: oregon
     plan: starter
     rootDir: backend
-    buildCommand: npm ci && npx prisma generate && npm run build
+    # --cache /tmp/.npm-cache forces npm to use ephemeral /tmp during the
+    # build phase (the persistent disk isn't mounted yet). This also overrides
+    # any stale NPM_CONFIG_CACHE env var left in the Render dashboard.
+    buildCommand: npm ci --cache /tmp/.npm-cache && npx prisma generate && npm run build
     startCommand: sh start.sh
     healthCheckPath: /api/v1/health
 
