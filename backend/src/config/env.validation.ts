@@ -34,6 +34,12 @@ const envSchema = z.object({
   STRIPE_SECRET_KEY: z.string().default(''),
   STRIPE_WEBHOOK_SECRET: z.string().default(''),
 
+  // PayPal
+  PAYPAL_CLIENT_ID: z.string().default(''),
+  PAYPAL_CLIENT_SECRET: z.string().default(''),
+  PAYPAL_WEBHOOK_ID: z.string().default(''),
+  PAYPAL_SANDBOX: z.string().default('true'),
+
   // GitHub OAuth integration
   GITHUB_CLIENT_ID: z.string().default(''),
   GITHUB_CLIENT_SECRET: z.string().default(''),

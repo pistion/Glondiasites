@@ -98,6 +98,16 @@ services:
       - key: STRIPE_WEBHOOK_SECRET
         sync: false
 
+      # ── PayPal ────────────────────────────────────────────────────────────
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      - key: PAYPAL_SANDBOX
+        value: "false"
+
       # ── S3 object storage ─────────────────────────────────────────────────
       - key: S3_ENDPOINT
         value: https://s3.amazonaws.com
