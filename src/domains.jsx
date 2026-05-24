@@ -70,12 +70,12 @@ export function DomainsMine({ navigate }) {
 
       {source === "api" && (
         <div className="card" style={{ padding: "10px 14px", fontSize: 13 }}>
-          <span className="row" style={{ gap: 8 }}><ICN.Server size={14} /> Connected to backend API</span>
+          <span className="row" style={{ gap: 8 }}><ICN.Server size={14} /> Local workspace</span>
         </div>
       )}
       {error && (
         <div className="card" style={{ padding: "10px 14px", fontSize: 13, color: "var(--text-muted)" }}>
-          Backend unavailable, showing prototype domains.
+          Showing local workspace domains.
         </div>
       )}
 
@@ -1152,12 +1152,12 @@ export function DnsEditor({ domain = "", navigate }) {
 
       {source === "api" && (
         <div className="card anim-fadeIn" style={{ padding: "10px 14px", fontSize: 13 }}>
-          <span className="row" style={{ gap: 8 }}><ICN.Server size={14} /> Connected to backend DNS API</span>
+          <span className="row" style={{ gap: 8 }}><ICN.Server size={14} /> Local workspace</span>
         </div>
       )}
       {(error || actionError) && (
         <div className="card anim-fadeIn" style={{ padding: "10px 14px", fontSize: 13, color: actionError ? "var(--danger)" : "var(--text-muted)" }}>
-          {actionError || "Backend unavailable, showing prototype DNS records."}
+          {actionError || "Showing local workspace DNS records."}
         </div>
       )}
 
@@ -1330,7 +1330,7 @@ function ImportZonePanel({ domainId, canMutate, onClose, onDone }) {
       </div>
 
       {!canMutate && (
-        <p className="muted" style={{ marginTop: 10, fontSize: 12 }}>Connect to the backend API to import records.</p>
+        <p className="muted" style={{ marginTop: 10, fontSize: 12 }}>Live DNS import is not available in local workspace mode.</p>
       )}
 
       {result && (

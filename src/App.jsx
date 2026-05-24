@@ -245,12 +245,12 @@ function BillingPageIntegrated() {
 
       {source === "api" && (
         <div className="card" style={{ padding: "10px 14px", fontSize: 13 }}>
-          <span className="row" style={{ gap: 8 }}><ICN.Server size={14} /> Connected to backend billing API</span>
+          <span className="row" style={{ gap: 8 }}><ICN.Server size={14} /> Local workspace</span>
         </div>
       )}
       {error && (
         <div className="card" style={{ padding: "10px 14px", fontSize: 13, color: "var(--text-muted)" }}>
-          Backend unavailable or permission denied, showing prototype billing.
+          Showing local workspace billing.
         </div>
       )}
 

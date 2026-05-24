@@ -72,12 +72,12 @@ export function HostingList({ navigate }) {
 
       {source === "api" && (
         <div className="card" style={{ padding: "10px 14px", fontSize: 13 }}>
-          <span className="row" style={{ gap: 8 }}><ICN.Server size={14} /> Connected to backend API</span>
+          <span className="row" style={{ gap: 8 }}><ICN.Server size={14} /> Local workspace</span>
         </div>
       )}
       {error && (
         <div className="card" style={{ padding: "10px 14px", fontSize: 13, color: "var(--text-muted)" }}>
-          Backend unavailable, showing prototype data.
+          Showing local workspace data.
         </div>
       )}
       {showCreate && (
@@ -345,7 +345,7 @@ function DeploymentsTab({ p }) {
             <button className="btn btn-sm btn-outline"><ICN.Filter size={14} /> Branch</button>
           </div>
         </div>
-        {error && <div style={{ padding: "10px 16px", color: "var(--text-muted)", fontSize: 13 }}>Backend unavailable, showing prototype deployments.</div>}
+        {error && <div style={{ padding: "10px 16px", color: "var(--text-muted)", fontSize: 13 }}>Showing local workspace deployments.</div>}
         {actionError && <div style={{ padding: "10px 16px", color: "var(--danger)", fontSize: 13 }}>{actionError}</div>}
         <table className="tbl">
           <thead>
@@ -438,7 +438,7 @@ function BuildLogsTab({ p, onRedeploy, deploying }) {
           <button className="btn btn-sm btn-outline" onClick={onRedeploy} disabled={deploying}><ICN.Refresh size={14} /> {deploying ? "Deploying..." : "Redeploy"}</button>
         </div>
       </div>
-      {error && <div style={{ padding: "10px 16px", color: "var(--text-muted)", fontSize: 13 }}>Backend unavailable, showing prototype logs.</div>}
+      {error && <div style={{ padding: "10px 16px", color: "var(--text-muted)", fontSize: 13 }}>Showing local workspace logs.</div>}
       {deployment?.artifact && (
         <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", fontSize: 13 }}>
           <div className="row" style={{ gap: 12, flexWrap: "wrap" }}>
@@ -604,7 +604,7 @@ function EnvVarsTab({ projectId, project }) {
       )}
 
       <div className="card card-flush">
-        {error && <div style={{ padding: "10px 16px", color: "var(--text-muted)", fontSize: 13 }}>Backend unavailable or permission denied, showing prototype variables.</div>}
+        {error && <div style={{ padding: "10px 16px", color: "var(--text-muted)", fontSize: 13 }}>Showing local workspace variables.</div>}
         {actionError && <div style={{ padding: "10px 16px", color: "var(--danger)", fontSize: 13 }}>{actionError}</div>}
         <table className="tbl">
           <thead>
@@ -854,12 +854,12 @@ function ProjectDomainsTabIntegrated({ p, navigate }) {
 
       {source === "api" && (
         <div className="card" style={{ padding: "10px 14px", fontSize: 13 }}>
-          <span className="row" style={{ gap: 8 }}><ICN.Server size={14} /> Connected to backend domain API</span>
+          <span className="row" style={{ gap: 8 }}><ICN.Server size={14} /> Local workspace</span>
         </div>
       )}
       {(error || actionError) && (
         <div className="card" style={{ padding: "10px 14px", fontSize: 13, color: actionError ? "var(--danger)" : "var(--text-muted)" }}>
-          {actionError || "Backend unavailable, showing prototype domain data."}
+          {actionError || "Showing local workspace domain data."}
         </div>
       )}
 

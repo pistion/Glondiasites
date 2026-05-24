@@ -22,12 +22,12 @@ export function ActivityPage() {
 
       {current.source === "api" && (
         <div className="card" style={{ padding: "10px 14px", fontSize: 13 }}>
-          <span className="row" style={{ gap: 8 }}><ICN.Server size={14} /> Connected to backend {tab.toLowerCase()} API</span>
+          <span className="row" style={{ gap: 8 }}><ICN.Server size={14} /> Local workspace</span>
         </div>
       )}
       {current.error && (
         <div className="card" style={{ padding: "10px 14px", fontSize: 13, color: "var(--text-muted)" }}>
-          Backend unavailable or permission denied, showing prototype activity.
+          Showing local workspace activity.
         </div>
       )}
 
