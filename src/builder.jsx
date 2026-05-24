@@ -11,7 +11,7 @@ import {
   saveBuilderPage, publishBuilderSite,
   createBuilderPage, deleteBuilderPage, listPageVersions,
   uploadBuilderSitePackage, importBuilderSiteFromGithub,
-  getRenderSettings, listRenderDeploys, listLiveRenderServices, triggerRenderDeploy,
+  getRenderSettings, listRenderDeploys, listLiveRenderServices, triggerRenderDeploy, testRenderDeploy,
 } from './api';
 import { STOREFRONT_TEMPLATES, StorefrontPreview, StorefrontModal } from './storefront-templates';
 
@@ -1011,6 +1011,7 @@ function ImportedGithubWorkspace({ content, site }) {
   const [renderStatus, setRenderStatus] = useStateB({ loading: true, settings: null, services: [], deploys: [], error: null });
   const [selectedRenderServiceId, setSelectedRenderServiceId] = useStateB('');
   const [deploying, setDeploying] = useStateB(false);
+  const [testingDeploy, setTestingDeploy] = useStateB(false);
   const [deployMsg, setDeployMsg] = useStateB(null);
 
   React.useEffect(() => {
@@ -1052,6 +1053,25 @@ function ImportedGithubWorkspace({ content, site }) {
       refreshRenderStatus();
     } finally {
       setDeploying(false);
+    }
+  };
+
+  const handleRenderTestDeploy = async () => {
+    setTestingDeploy(true);
+    setDeployMsg(null);
+    try {
+      const result = await testRenderDeploy({
+        siteId: site?.id,
+        serviceId: selectedRenderServiceId,
+        repo: content._repository,
+        name: content.siteName || content._repository,
+      });
+      setDeployMsg(result.status === 'passed'
+        ? `Test deploy passed: ${result.deployId} was triggered and canceled.`
+        : result.message || result.error || 'Render test deploy needs attention.');
+      refreshRenderStatus();
+    } finally {
+      setTestingDeploy(false);
     }
   };
 
@@ -1113,6 +1133,9 @@ function ImportedGithubWorkspace({ content, site }) {
           {deployMsg && <div style={{ color: "var(--accent)", fontSize: 13 }}>{deployMsg}</div>}
           <div className="row" style={{ gap: 8, justifyContent: "flex-end" }}>
             <button className="btn btn-sm btn-outline" onClick={refreshRenderStatus} disabled={renderStatus.loading}>Refresh</button>
+            <button className="btn btn-sm btn-outline" onClick={handleRenderTestDeploy} disabled={testingDeploy || deploying}>
+              {testingDeploy ? "Testing..." : "Test deploy"}
+            </button>
             <button className="btn btn-sm btn-primary" onClick={handleRenderDeploy} disabled={deploying}>
               <ICN.Rocket size={13} /> {deploying ? "Triggering..." : "Deploy to Render"}
             </button>

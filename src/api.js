@@ -502,6 +502,25 @@ export async function triggerRenderDeploy(input = {}) {
   }
 }
 
+export async function testRenderDeploy(input = {}) {
+  try {
+    const response = await fetch('/api/render/test-deploy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result?.error?.message || result?.message || `Render test deploy failed with ${response.status}.`);
+    return result;
+  } catch (error) {
+    return {
+      status: 'unavailable',
+      provider: 'render',
+      message: error.message || 'Render test deploy endpoint is unavailable.',
+    };
+  }
+}
+
 export async function getRenderSettings() {
   try {
     const response = await fetch('/api/render/settings');

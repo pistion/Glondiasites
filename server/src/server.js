@@ -111,6 +111,15 @@ app.post('/api/render/deploy', async (req, res, next) => {
   }
 });
 
+app.post('/api/render/test-deploy', async (req, res, next) => {
+  try {
+    const result = await testRenderDeploy(req.body || {});
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get('/api/render/settings', async (req, res, next) => {
   try {
     res.json(getRenderSettings());
@@ -446,7 +455,7 @@ async function triggerRenderDeploy(input = {}) {
       Accept: 'application/json',
     },
     body: JSON.stringify({
-      clearCache: input.clearCache === true ? 'clear' : 'do_not_clear',
+      clearCache: input.clearCache === 'clear' || input.clearCache === true ? 'clear' : 'do_not_clear',
     }),
   });
   const bodyText = await response.text();
@@ -466,6 +475,79 @@ async function triggerRenderDeploy(input = {}) {
     serviceId,
     deploy: body,
   };
+}
+
+async function testRenderDeploy(input = {}) {
+  const serviceId = await resolveRenderServiceId(input);
+  const apiKey = process.env.RENDER_API_KEY;
+  if (!apiKey || !serviceId) {
+    return {
+      status: 'configuration_required',
+      settings: getRenderSettings({ ...input, serviceId }),
+      message: 'Set RENDER_API_KEY and select or configure RENDER_SERVICE_ID before testing deploy.',
+    };
+  }
+
+  const headers = {
+    Authorization: `Bearer ${apiKey}`,
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+  };
+
+  const deployResponse = await fetch(`https://api.render.com/v1/services/${encodeURIComponent(serviceId)}/deploys`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ clearCache: 'do_not_clear' }),
+  });
+  const deploy = await readRenderJson(deployResponse);
+  if (!deployResponse.ok) {
+    return {
+      status: 'failed',
+      phase: 'trigger',
+      serviceId,
+      error: deploy?.message || `Render deploy trigger failed with ${deployResponse.status}.`,
+      response: deploy,
+    };
+  }
+
+  const deployId = deploy.id;
+  await delay(2000);
+  const beforeCancel = await getRenderDeploy(serviceId, deployId, headers);
+  const cancelResponse = await fetch(`https://api.render.com/v1/services/${encodeURIComponent(serviceId)}/deploys/${encodeURIComponent(deployId)}/cancel`, {
+    method: 'POST',
+    headers,
+    body: '{}',
+  });
+  const cancel = await readRenderJson(cancelResponse);
+  await delay(2000);
+  const afterCancel = await getRenderDeploy(serviceId, deployId, headers);
+
+  return {
+    status: afterCancel?.status === 'canceled' ? 'passed' : 'check',
+    serviceId,
+    deployId,
+    triggerStatus: deploy.status,
+    statusBeforeCancel: beforeCancel?.status || null,
+    cancelResponseStatus: cancel?.status || null,
+    statusAfterCancel: afterCancel?.status || null,
+    trigger: afterCancel?.trigger || deploy.trigger || 'api',
+  };
+}
+
+async function getRenderDeploy(serviceId, deployId, headers) {
+  const response = await fetch(`https://api.render.com/v1/services/${encodeURIComponent(serviceId)}/deploys/${encodeURIComponent(deployId)}`, {
+    headers,
+  });
+  return readRenderJson(response);
+}
+
+async function readRenderJson(response) {
+  const text = await response.text();
+  try { return text ? JSON.parse(text) : {}; } catch { return { raw: text }; }
+}
+
+function delay(ms) {
+  return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
 }
 
 function getRenderSettings(input = {}) {
