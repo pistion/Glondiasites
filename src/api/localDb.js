@@ -297,6 +297,7 @@ export function createLocalDbRuntime({ makeSession, ttlToSeconds }) {
       outputDirectory: input.outputDirectory || 'dist',
       productionBranch: input.productionBranch || 'main',
       renderServiceId: input.renderServiceId || null,
+      renderConfig: input.renderConfig || null,
       domain: `${slug}.glondia.app`,
       createdAt: now,
       updatedAt: now,

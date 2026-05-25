@@ -122,6 +122,7 @@ export function createBuilderActions({
         installCommand: input.installCommand || 'npm ci',
         buildCommand: input.buildCommand || 'npm run build',
         outputDirectory: input.outputDirectory || 'dist',
+        renderConfig: input.renderConfig || null,
         content: {
           _source: 'github',
           _repository: repo.fullName,
@@ -140,6 +141,7 @@ export function createBuilderActions({
           _sandboxFiles: sandbox.files || [],
           _sandboxLogs: sandbox.logs,
           _sandboxError: sandbox.error,
+          _renderConfig: input.renderConfig || null,
         },
       });
 
@@ -153,6 +155,10 @@ export function createBuilderActions({
         repositoryName: repo.repo,
         repositoryUrl: repo.url,
         productionBranch: branch,
+        rootDirectory: input.rootDirectory || '',
+        buildCommand: input.buildCommand || 'npm run build',
+        outputDirectory: input.outputDirectory || 'dist',
+        renderConfig: input.renderConfig || null,
       });
       db.projects.unshift(project);
       const storedSite = db.sites.find((item) => item.id === site.id);
@@ -168,6 +174,7 @@ export function createBuilderActions({
         storedSite.installCommand = input.installCommand || 'npm ci';
         storedSite.buildCommand = input.buildCommand || 'npm run build';
         storedSite.outputDirectory = input.outputDirectory || 'dist';
+        storedSite.renderConfig = input.renderConfig || null;
         storedSite.sandboxId = sandboxId;
         storedSite.previewUrl = sandbox.previewUrl || null;
       }

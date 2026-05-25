@@ -26,6 +26,9 @@ export const GD = {
   // Reference data.
   tldPrices: [
     { tld: ".com", price: 14.99, renewal: 16.99 },
+    { tld: ".com.pg", price: 49.99, renewal: 49.99 },
+    { tld: ".com.fj", price: 59.99, renewal: 59.99 },
+    { tld: ".com.vu", price: 44.99, renewal: 44.99 },
     { tld: ".co", price: 24.99, renewal: 26.99 },
     { tld: ".io", price: 39.99, renewal: 49.99 },
     { tld: ".app", price: 16.99, renewal: 18.99 },

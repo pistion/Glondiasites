@@ -296,9 +296,12 @@ const EMPTY_CONTACT = {
   country: '',
 };
 
+const FEATURED_TLDS = [".com", ".com.pg", ".com.fj", ".com.vu"];
+
 export function DomainsBuy({ navigate }) {
   const [step, setStep] = useStateD("search"); // search | results | checkout | done
   const [query, setQuery] = useStateD("");
+  const [selectedTld, setSelectedTld] = useStateD(".com");
   const [cart, setCart] = useStateD([]);
   const [contact, setContact] = useStateD(EMPTY_CONTACT);
   const [registering, setRegistering] = useStateD(false);
@@ -384,6 +387,8 @@ export function DomainsBuy({ navigate }) {
         <SearchPanel
           query={query}
           setQuery={setQuery}
+          selectedTld={selectedTld}
+          setSelectedTld={setSelectedTld}
           onSearch={() => setStep("results")}
         />
       )}
@@ -393,6 +398,7 @@ export function DomainsBuy({ navigate }) {
           cart={cart}
           addToCart={addToCart}
           removeFromCart={removeFromCart}
+          selectedTld={selectedTld}
           onBack={() => setStep("search")}
           onCheckout={() => setStep("checkout")}
         />
@@ -422,12 +428,43 @@ export function DomainsBuy({ navigate }) {
   );
 }
 
-function SearchPanel({ query, setQuery, onSearch }) {
+function SearchPanel({ query, setQuery, selectedTld, setSelectedTld, onSearch }) {
+  const selectedIndex = Math.max(0, FEATURED_TLDS.indexOf(selectedTld));
+  const [pushAnimating, setPushAnimating] = useStateD(false);
+  const [previousTld, setPreviousTld] = useStateD(null);
+  const shiftTld = () => {
+    if (pushAnimating) return;
+    setPushAnimating(true);
+    setPreviousTld(selectedTld);
+    const nextIndex = (selectedIndex + 1) % FEATURED_TLDS.length;
+    setSelectedTld(FEATURED_TLDS[nextIndex]);
+    window.setTimeout(() => {
+      setPushAnimating(false);
+      setPreviousTld(null);
+    }, 430);
+  };
+
   return (
     <div className="dom-hero">
       <h2>Search for the perfect name.</h2>
       <p>Type a name, business, or idea. We'll check availability across every TLD.</p>
       <form className="dom-search input-group lg" onSubmit={(e) => { e.preventDefault(); if (query.trim()) onSearch(); }}>
+        <button
+          className="tld-push-input"
+          type="button"
+          aria-live="polite"
+          aria-label={`Selected domain extension ${selectedTld}. Click to change.`}
+          onClick={shiftTld}
+        >
+          {previousTld && (
+            <span className="tld-push-item item-out">
+              <span className="tld-push-label">{previousTld}</span>
+            </span>
+          )}
+          <span key={selectedTld} className={`tld-push-item ${pushAnimating ? "item-in" : ""}`}>
+            <span className="tld-push-label">{selectedTld}</span>
+          </span>
+        </button>
         <input className="input" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="e.g. emakora, kumul-shop, talimedia" autoFocus />
         <button className="btn btn-primary" type="submit">
           <ICN.Search size={16} /> Search
@@ -443,7 +480,7 @@ function SearchPanel({ query, setQuery, onSearch }) {
   );
 }
 
-function SearchResults({ query, cart, addToCart, removeFromCart, onBack, onCheckout }) {
+function SearchResults({ query, cart, addToCart, removeFromCart, selectedTld, onBack, onCheckout }) {
   const base = (query || "yourdomain").toLowerCase().replace(/[^a-z0-9-]/g, "");
   const [results, setResults] = useStateD(null); // null = loading, array = done
   const [searchError, setSearchError] = useStateD(null);
@@ -493,8 +530,8 @@ function SearchResults({ query, cart, addToCart, removeFromCart, onBack, onCheck
   const subtotal = cart.reduce((a, c) => a + c.price, 0);
   const loading = results === null;
   const availableCount = (results || []).filter(r => r.available).length;
-  const comResult = (results || []).find(r => r.name === base + '.com');
-  const comAvailable = comResult?.available ?? false;
+  const selectedResult = (results || []).find(r => r.name === base + selectedTld);
+  const selectedAvailable = selectedResult?.available ?? false;
 
   return (
     <div className="grid-side" style={{ alignItems: "flex-start" }}>
@@ -515,31 +552,31 @@ function SearchResults({ query, cart, addToCart, removeFromCart, onBack, onCheck
         <div className="card" style={{ background: "linear-gradient(180deg, var(--accent-soft), transparent), var(--bg-elev)", borderColor: "color-mix(in srgb, var(--accent) 30%, var(--border))" }}>
           <div className="row between" style={{ alignItems: "flex-start" }}>
             <div>
-              <Badge tone={comAvailable ? "success" : "warning"}>
-                {loading ? "Checking…" : comAvailable ? "Top match" : "Taken — see alternatives"}
+              <Badge tone={selectedAvailable ? "success" : "warning"}>
+                {loading ? "Checking..." : selectedAvailable ? "Top match" : "Taken - see alternatives"}
               </Badge>
               <div className="mono" style={{ fontSize: 28, fontWeight: 600, marginTop: 10 }}>
-                {base}<span style={{ color: "var(--accent)" }}>.com</span>
+                {base}<span style={{ color: "var(--accent)" }}>{selectedTld}</span>
               </div>
-              {!loading && !comAvailable && (
+              {!loading && !selectedAvailable && (
                 <p className="muted" style={{ margin: "8px 0 0", maxWidth: 50 + "ch" }}>
-                  .com is taken — but we found <b>{availableCount}</b> great alternatives below.
+                  {selectedTld} is taken - but we found <b>{availableCount}</b> great alternatives below.
                 </p>
               )}
-              {!loading && comAvailable && (
+              {!loading && selectedAvailable && (
                 <p className="muted" style={{ margin: "8px 0 0" }}>
-                  Great news — <b className="mono" style={{ color: 'var(--text)' }}>{base}.com</b> is available!
+                  Great news — <b className="mono" style={{ color: 'var(--text)' }}>{base}{selectedTld}</b> is available!
                 </p>
               )}
             </div>
             <div className="row" style={{ alignItems: "flex-end", flexDirection: "column", gap: 10 }}>
-              {!loading && (comAvailable
+              {!loading && (selectedAvailable
                 ? <Badge tone="success">Available</Badge>
                 : <Badge tone="danger">Taken</Badge>
               )}
-              {!loading && comAvailable && comResult && (
+              {!loading && selectedAvailable && selectedResult && (
                 <button className="btn btn-primary btn-sm"
-                  onClick={() => addToCart({ name: comResult.name, price: comResult.price, renewal: comResult.renewal ?? comResult.price, premium: !!comResult.premium })}>
+                  onClick={() => addToCart({ name: selectedResult.name, price: selectedResult.price, renewal: selectedResult.renewal ?? selectedResult.price, premium: !!selectedResult.premium })}>
                   Add to cart
                 </button>
               )}
@@ -623,7 +660,7 @@ function DomainResultRow({ r, delay = 0, inCart, onAdd, onRemove }) {
     return (
       <div className="dom-result taken" style={{ animationDelay: `${delay}s` }}>
         <div>
-          <span className="dname">{r.name.replace(/(\.[a-z]+)$/, "")}<span className="tld">{r.tld}</span></span>
+          <span className="dname">{r.name.slice(0, -r.tld.length)}<span className="tld">{r.tld}</span></span>
         </div>
         <Badge tone="danger" dot={false}>Taken</Badge>
         <button className="btn btn-sm btn-outline">View options</button>
@@ -634,7 +671,7 @@ function DomainResultRow({ r, delay = 0, inCart, onAdd, onRemove }) {
     <div className={`dom-result ${r.premium ? "premium" : ""}`} style={{ animationDelay: `${delay}s` }}>
       <div>
         <span className="dname">
-          {r.name.replace(/(\.[a-z]+)$/, "")}<span className="tld">{r.tld}</span>
+          {r.name.slice(0, -r.tld.length)}<span className="tld">{r.tld}</span>
           {r.premium && <span className="premium-tag">Premium</span>}
         </span>
         <div className="meta" style={{ marginTop: 4 }}>
@@ -1427,3 +1464,4 @@ function dnsPayloadFromRecord(record) {
     proxied: !!record.proxy,
   };
 }
+

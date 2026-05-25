@@ -22,6 +22,7 @@ export {
   getGitHubStatus,
   listGitHubBranches,
   listGitHubRepos,
+  parseGithubRepo,
 } from './api/github.js';
 import {
   mapApiActivity,
