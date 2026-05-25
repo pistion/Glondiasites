@@ -2,6 +2,11 @@ import renderApiService from './renderApiService.js';
 import { makeId, mutateHostingStore, nowIso, readHostingStore } from './hostingStore.js';
 
 class DiskService {
+  async list(serviceId) {
+    const store = await readHostingStore();
+    return store.disks[serviceId] || [];
+  }
+
   async attach(serviceId, input = {}) {
     const disk = validateDisk(input);
     const deployment = await findDeploymentByService(serviceId);
@@ -91,4 +96,3 @@ function notFound(message) {
 }
 
 export default new DiskService();
-

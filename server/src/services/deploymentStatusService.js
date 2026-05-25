@@ -8,10 +8,10 @@ const FAILED_STATUSES = new Set(['build_failed', 'update_failed', 'pre_deploy_fa
 class DeploymentStatusService {
   normalizeStatus(renderStatus) {
     const status = String(renderStatus || '').toLowerCase();
-    if (SUCCESS_STATUSES.has(status)) return { status: 'live', buildStatus: 'succeeded' };
-    if (FAILED_STATUSES.has(status)) return { status: 'failed', buildStatus: 'failed' };
-    if (BUILDING_STATUSES.has(status)) return { status: 'building', buildStatus: status || 'building' };
-    return { status: status || 'queued', buildStatus: status || 'queued' };
+    if (SUCCESS_STATUSES.has(status)) return { status: 'live', buildStatus: 'succeeded', currentStep: 'Verifying URL' };
+    if (FAILED_STATUSES.has(status)) return { status: 'failed', buildStatus: 'failed', currentStep: 'Failed' };
+    if (BUILDING_STATUSES.has(status)) return { status: 'building', buildStatus: status || 'building', currentStep: 'Building' };
+    return { status: status || 'queued', buildStatus: status || 'queued', currentStep: status === 'queued' ? 'Queued' : 'Sending to Render' };
   }
 
   async refreshDeployment(deployment) {
@@ -42,7 +42,21 @@ class DeploymentStatusService {
       return { ok: false, error: error.message, checkedAt: nowIso() };
     }
   }
+
+  statusLabel(status) {
+    return {
+      preparing: 'Preparing',
+      configuration_required: 'Preparing',
+      queued: 'Queued',
+      building: 'Building',
+      deploying: 'Deploying',
+      deployed: 'Verifying URL',
+      live: 'Live',
+      failed: 'Failed',
+      suspended: 'Suspended',
+      deleted: 'Deleted',
+    }[status] || 'Preparing';
+  }
 }
 
 export default new DeploymentStatusService();
-

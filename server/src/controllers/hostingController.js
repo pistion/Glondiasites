@@ -11,7 +11,7 @@ const hostingController = {
 
   getHostingService: async (req, res, next) => {
     try {
-      res.ok(await hostingService.getService(req.params.serviceId));
+      res.ok(await hostingService.getService(req.params.deploymentId));
     } catch (error) {
       next(error);
     }
@@ -19,7 +19,23 @@ const hostingController = {
 
   updateSettings: async (req, res, next) => {
     try {
-      res.ok(await hostingService.updateSettings(req.params.serviceId, req.body || {}));
+      res.ok(await hostingService.updateSettings(req.params.deploymentId, req.body || {}));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  suspendHostingService: async (req, res, next) => {
+    try {
+      res.ok(await hostingService.suspend(req.params.deploymentId));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  deleteHostingService: async (req, res, next) => {
+    try {
+      res.ok(await hostingService.delete(req.params.deploymentId));
     } catch (error) {
       next(error);
     }
@@ -27,4 +43,3 @@ const hostingController = {
 };
 
 export default hostingController;
-

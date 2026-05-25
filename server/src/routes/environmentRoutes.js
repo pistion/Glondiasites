@@ -1,16 +1,15 @@
 import express from 'express';
 import environmentController from '../controllers/environmentController.js';
 import authMiddleware from '../middleware/authMiddleware.js';
-import renderServiceMiddleware from '../middleware/renderServiceMiddleware.js';
 import { requireBody } from '../middleware/validationMiddleware.js';
 
 const router = express.Router({ mergeParams: true });
 
 router.use(authMiddleware);
-router.get('/:serviceId/env', renderServiceMiddleware, environmentController.listEnvironmentVariables);
-router.post('/:serviceId/env', renderServiceMiddleware, requireBody(['key', 'value']), environmentController.createEnvironmentVariable);
-router.patch('/:serviceId/env/:key', renderServiceMiddleware, environmentController.updateEnvironmentVariable);
-router.delete('/:serviceId/env/:key', renderServiceMiddleware, environmentController.deleteEnvironmentVariable);
+router.get('/:deploymentId/env', environmentController.listEnvironmentVariables);
+router.post('/:deploymentId/env', requireBody(['key', 'value']), environmentController.createEnvironmentVariable);
+router.patch('/:deploymentId/env/:key', environmentController.updateEnvironmentVariable);
+router.delete('/:deploymentId/env/:key', environmentController.deleteEnvironmentVariable);
+router.post('/:deploymentId/env/sync', environmentController.syncEnvironmentVariables);
 
 export default router;
-

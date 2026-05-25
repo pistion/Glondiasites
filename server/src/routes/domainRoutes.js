@@ -1,15 +1,14 @@
 import express from 'express';
 import domainController from '../controllers/domainController.js';
 import authMiddleware from '../middleware/authMiddleware.js';
-import renderServiceMiddleware from '../middleware/renderServiceMiddleware.js';
 
 const router = express.Router({ mergeParams: true });
 
 router.use(authMiddleware);
-router.post('/:serviceId/domains', renderServiceMiddleware, domainController.addDomain);
-router.get('/:serviceId/domains', renderServiceMiddleware, domainController.listDomains);
-router.get('/:serviceId/domains/:domainId/status', renderServiceMiddleware, domainController.getDomainStatus);
-router.delete('/:serviceId/domains/:domainId', renderServiceMiddleware, domainController.deleteDomain);
+router.get('/:deploymentId/domains', domainController.listDomains);
+router.post('/:deploymentId/domains', domainController.addDomain);
+router.get('/:deploymentId/domains/:domainId/status', domainController.getDomainStatus);
+router.post('/:deploymentId/domains/:domainId/verify', domainController.getDomainStatus);
+router.delete('/:deploymentId/domains/:domainId', domainController.deleteDomain);
 
 export default router;
-

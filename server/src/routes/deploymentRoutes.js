@@ -10,8 +10,8 @@ router.use(authMiddleware);
 router.post('/', validateDeploymentInput, deploymentController.createDeployment);
 router.get('/:deploymentId', deploymentSessionMiddleware, deploymentController.getDeployment);
 router.get('/:deploymentId/status', deploymentSessionMiddleware, deploymentController.getStatus);
+router.post('/:deploymentId/verify-url', deploymentSessionMiddleware, deploymentController.verifyUrl);
 router.post('/:deploymentId/redeploy', deploymentSessionMiddleware, deploymentController.redeploy);
 router.get('/:deploymentId/logs', deploymentSessionMiddleware, deploymentController.getLogs);
 
 export default router;
-

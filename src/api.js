@@ -171,84 +171,120 @@ export async function getRenderDeploymentStatus(deploymentId) {
   return hostingRequest(`/deployments/${deploymentId}/status`);
 }
 
+export async function verifyRenderDeploymentUrl(deploymentId) {
+  const deployment = await hostingRequest(`/deployments/${deploymentId}/verify-url`, { method: 'POST' });
+  notifyDataChanged();
+  return deployment;
+}
+
 export async function redeployRenderDeployment(deploymentId, input = {}) {
   const deployment = await hostingRequest(`/deployments/${deploymentId}/redeploy`, { method: 'POST', body: JSON.stringify(input) });
   notifyDataChanged();
   return deployment;
 }
 
+export async function getRenderDeploymentLogs(deploymentId) {
+  return hostingRequest(`/deployments/${deploymentId}/logs`);
+}
+
 export async function listHostingDeployments() {
   return hostingRequest('/hosting');
 }
 
-export async function getHostingService(serviceId) {
-  return hostingRequest(`/hosting/${serviceId}`);
+export async function getHostingService(deploymentId) {
+  return hostingRequest(`/hosting/${deploymentId}`);
 }
 
-export async function updateHostingSettings(serviceId, input) {
-  const service = await hostingRequest(`/hosting/${serviceId}/settings`, { method: 'PATCH', body: JSON.stringify(input) });
+export async function updateHostingSettings(deploymentId, input) {
+  const service = await hostingRequest(`/hosting/${deploymentId}/settings`, { method: 'PATCH', body: JSON.stringify(input) });
   notifyDataChanged();
   return service;
 }
 
-export async function listHostingEnvVars(serviceId) {
-  return hostingRequest(`/hosting/${serviceId}/env`);
-}
-
-export async function upsertHostingEnvVar(serviceId, input) {
-  const envVar = await hostingRequest(`/hosting/${serviceId}/env`, { method: 'POST', body: JSON.stringify(input) });
+export async function suspendHostingDeployment(deploymentId) {
+  const service = await hostingRequest(`/hosting/${deploymentId}/suspend`, { method: 'POST' });
   notifyDataChanged();
-  return envVar;
+  return service;
 }
 
-export async function updateHostingEnvVar(serviceId, key, input) {
-  const envVar = await hostingRequest(`/hosting/${serviceId}/env/${encodeURIComponent(key)}`, { method: 'PATCH', body: JSON.stringify(input) });
-  notifyDataChanged();
-  return envVar;
-}
-
-export async function deleteHostingEnvVar(serviceId, key) {
-  const result = await hostingRequest(`/hosting/${serviceId}/env/${encodeURIComponent(key)}`, { method: 'DELETE' });
+export async function deleteHostingDeployment(deploymentId) {
+  const result = await hostingRequest(`/hosting/${deploymentId}`, { method: 'DELETE' });
   notifyDataChanged();
   return result;
 }
 
-export async function attachHostingDisk(serviceId, input) {
-  const disk = await hostingRequest(`/hosting/${serviceId}/disk`, { method: 'POST', body: JSON.stringify(input) });
-  notifyDataChanged();
-  return disk;
+export async function listHostingEnvVars(deploymentId) {
+  return hostingRequest(`/hosting/${deploymentId}/env`);
 }
 
-export async function updateHostingDisk(serviceId, diskId, input) {
-  const disk = await hostingRequest(`/hosting/${serviceId}/disk/${diskId}`, { method: 'PATCH', body: JSON.stringify(input) });
+export async function upsertHostingEnvVar(deploymentId, input) {
+  const envVar = await hostingRequest(`/hosting/${deploymentId}/env`, { method: 'POST', body: JSON.stringify(input) });
   notifyDataChanged();
-  return disk;
+  return envVar;
 }
 
-export async function deleteHostingDisk(serviceId, diskId) {
-  const result = await hostingRequest(`/hosting/${serviceId}/disk/${diskId}`, { method: 'DELETE' });
+export async function updateHostingEnvVar(deploymentId, key, input) {
+  const envVar = await hostingRequest(`/hosting/${deploymentId}/env/${encodeURIComponent(key)}`, { method: 'PATCH', body: JSON.stringify(input) });
+  notifyDataChanged();
+  return envVar;
+}
+
+export async function deleteHostingEnvVar(deploymentId, key) {
+  const result = await hostingRequest(`/hosting/${deploymentId}/env/${encodeURIComponent(key)}`, { method: 'DELETE' });
   notifyDataChanged();
   return result;
 }
 
-export async function addHostingDomain(serviceId, input) {
-  const domain = await hostingRequest(`/hosting/${serviceId}/domains`, { method: 'POST', body: JSON.stringify(input) });
+export async function syncHostingEnvVars(deploymentId) {
+  const result = await hostingRequest(`/hosting/${deploymentId}/env/sync`, { method: 'POST' });
+  notifyDataChanged();
+  return result;
+}
+
+export async function listHostingDisks(deploymentId) {
+  return hostingRequest(`/hosting/${deploymentId}/disk`);
+}
+
+export async function attachHostingDisk(deploymentId, input) {
+  const disk = await hostingRequest(`/hosting/${deploymentId}/disk`, { method: 'POST', body: JSON.stringify(input) });
+  notifyDataChanged();
+  return disk;
+}
+
+export async function updateHostingDisk(deploymentId, diskId, input) {
+  const disk = await hostingRequest(`/hosting/${deploymentId}/disk/${diskId}`, { method: 'PATCH', body: JSON.stringify(input) });
+  notifyDataChanged();
+  return disk;
+}
+
+export async function deleteHostingDisk(deploymentId, diskId) {
+  const result = await hostingRequest(`/hosting/${deploymentId}/disk/${diskId}`, { method: 'DELETE' });
+  notifyDataChanged();
+  return result;
+}
+
+export async function addHostingDomain(deploymentId, input) {
+  const domain = await hostingRequest(`/hosting/${deploymentId}/domains`, { method: 'POST', body: JSON.stringify(input) });
   notifyDataChanged();
   return domain;
 }
 
-export async function listHostingDomains(serviceId) {
-  return hostingRequest(`/hosting/${serviceId}/domains`);
+export async function listHostingDomains(deploymentId) {
+  return hostingRequest(`/hosting/${deploymentId}/domains`);
 }
 
-export async function verifyHostingDomain(serviceId, domainId) {
-  const domain = await hostingRequest(`/hosting/${serviceId}/domains/${domainId}/status`);
+export async function getHostingDomainStatus(deploymentId, domainId) {
+  return hostingRequest(`/hosting/${deploymentId}/domains/${domainId}/status`);
+}
+
+export async function verifyHostingDomain(deploymentId, domainId) {
+  const domain = await hostingRequest(`/hosting/${deploymentId}/domains/${domainId}/verify`, { method: 'POST' });
   notifyDataChanged();
   return domain;
 }
 
-export async function deleteHostingDomain(serviceId, domainId) {
-  const result = await hostingRequest(`/hosting/${serviceId}/domains/${domainId}`, { method: 'DELETE' });
+export async function deleteHostingDomain(deploymentId, domainId) {
+  const result = await hostingRequest(`/hosting/${deploymentId}/domains/${domainId}`, { method: 'DELETE' });
   notifyDataChanged();
   return result;
 }

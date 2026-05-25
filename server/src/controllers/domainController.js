@@ -3,7 +3,7 @@ import domainService from '../services/domainService.js';
 const domainController = {
   addDomain: async (req, res, next) => {
     try {
-      res.created(await domainService.add(req.params.serviceId, req.body || {}));
+      res.created(await domainService.add(req.params.deploymentId, req.body || {}));
     } catch (error) {
       next(error);
     }
@@ -11,7 +11,7 @@ const domainController = {
 
   listDomains: async (req, res, next) => {
     try {
-      res.ok(await domainService.list(req.params.serviceId));
+      res.ok(await domainService.list(req.params.deploymentId));
     } catch (error) {
       next(error);
     }
@@ -19,7 +19,7 @@ const domainController = {
 
   getDomainStatus: async (req, res, next) => {
     try {
-      res.ok(await domainService.status(req.params.serviceId, req.params.domainId));
+      res.ok(await domainService.status(req.params.deploymentId, req.params.domainId));
     } catch (error) {
       next(error);
     }
@@ -27,7 +27,7 @@ const domainController = {
 
   deleteDomain: async (req, res, next) => {
     try {
-      res.ok(await domainService.remove(req.params.serviceId, req.params.domainId));
+      res.ok(await domainService.remove(req.params.deploymentId, req.params.domainId));
     } catch (error) {
       next(error);
     }
@@ -35,4 +35,3 @@ const domainController = {
 };
 
 export default domainController;
-

@@ -19,7 +19,7 @@ import {
 } from './tweaks-panel';
 import { Marketing } from './marketing';
 import { Overview } from './overview';
-import { HostingList, HostingDetail } from './hosting';
+import { HostingList, HostingDetail } from './hosting-control';
 import { DomainsMine, DomainsBuy, DnsEditor } from './domains';
 import { BuilderGallery, BuilderTemplates, BuilderRoxanne, BuilderImport, BuilderEditor } from './builder';
 import { ActivityPage } from './activity';

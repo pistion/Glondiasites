@@ -31,6 +31,16 @@ class RenderApiService {
     return this.request(`/services/${encodeURIComponent(serviceId)}`, { method: 'PATCH', body: settings });
   }
 
+  async suspendService(serviceId) {
+    if (!this.configured()) return this.configurationRequired('suspend_service');
+    return this.request(`/services/${encodeURIComponent(serviceId)}/suspend`, { method: 'POST', body: {} });
+  }
+
+  async deleteService(serviceId) {
+    if (!this.configured()) return this.configurationRequired('delete_service');
+    return this.request(`/services/${encodeURIComponent(serviceId)}`, { method: 'DELETE' });
+  }
+
   async triggerDeploy(serviceId, input = {}) {
     if (!this.configured()) return this.configurationRequired('trigger_deploy');
     return this.request(`/services/${encodeURIComponent(serviceId)}/deploys`, {

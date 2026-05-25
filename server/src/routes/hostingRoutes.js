@@ -1,14 +1,14 @@
 import express from 'express';
 import hostingController from '../controllers/hostingController.js';
 import authMiddleware from '../middleware/authMiddleware.js';
-import renderServiceMiddleware from '../middleware/renderServiceMiddleware.js';
 
 const router = express.Router();
 
 router.use(authMiddleware);
 router.get('/', hostingController.listHosting);
-router.get('/:serviceId', renderServiceMiddleware, hostingController.getHostingService);
-router.patch('/:serviceId/settings', renderServiceMiddleware, hostingController.updateSettings);
+router.get('/:deploymentId', hostingController.getHostingService);
+router.patch('/:deploymentId/settings', hostingController.updateSettings);
+router.post('/:deploymentId/suspend', hostingController.suspendHostingService);
+router.delete('/:deploymentId', hostingController.deleteHostingService);
 
 export default router;
-

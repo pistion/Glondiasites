@@ -3,7 +3,7 @@ import environmentService from '../services/environmentService.js';
 const environmentController = {
   listEnvironmentVariables: async (req, res, next) => {
     try {
-      res.ok(await environmentService.list(req.params.serviceId));
+      res.ok(await environmentService.list(req.params.deploymentId));
     } catch (error) {
       next(error);
     }
@@ -11,7 +11,7 @@ const environmentController = {
 
   createEnvironmentVariable: async (req, res, next) => {
     try {
-      res.created(await environmentService.upsert(req.params.serviceId, req.body || {}));
+      res.created(await environmentService.upsert(req.params.deploymentId, req.body || {}));
     } catch (error) {
       next(error);
     }
@@ -19,7 +19,7 @@ const environmentController = {
 
   updateEnvironmentVariable: async (req, res, next) => {
     try {
-      res.ok(await environmentService.patch(req.params.serviceId, req.params.key, req.body || {}));
+      res.ok(await environmentService.patch(req.params.deploymentId, req.params.key, req.body || {}));
     } catch (error) {
       next(error);
     }
@@ -27,7 +27,15 @@ const environmentController = {
 
   deleteEnvironmentVariable: async (req, res, next) => {
     try {
-      res.ok(await environmentService.remove(req.params.serviceId, req.params.key));
+      res.ok(await environmentService.remove(req.params.deploymentId, req.params.key));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  syncEnvironmentVariables: async (req, res, next) => {
+    try {
+      res.ok(await environmentService.sync(req.params.deploymentId));
     } catch (error) {
       next(error);
     }
@@ -35,4 +43,3 @@ const environmentController = {
 };
 
 export default environmentController;
-

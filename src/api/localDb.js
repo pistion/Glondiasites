@@ -96,12 +96,32 @@ export function createLocalDbRuntime({ makeSession, ttlToSeconds }) {
       return pickDeploymentStatus(deployment);
     }
 
+    const renderVerifyUrlMatch = cleanPath.match(/^\/deployments\/([^/]+)\/verify-url$/);
+    if (renderVerifyUrlMatch) {
+      const deployment = db.deployments.find((item) => item.id === renderVerifyUrlMatch[1] || item.deploymentId === renderVerifyUrlMatch[1]);
+      if (!deployment) throw new Error('Deployment not found.');
+      deployment.liveUrl ||= `https://${slugify(deployment.serviceName)}.onrender.com`;
+      deployment.verifiedUrl = deployment.liveUrl;
+      deployment.urlReachable = true;
+      deployment.status = 'live';
+      deployment.currentStep = 'Live';
+      deployment.buildStatus = 'succeeded';
+      deployment.errorMessage = null;
+      deployment.lastDeployedAt = new Date().toISOString();
+      deployment.updatedAt = new Date().toISOString();
+      syncHostingServiceFromDeployment(db, deployment);
+      writeLocalDb(db);
+      return deployment;
+    }
+
     const renderRedeployMatch = cleanPath.match(/^\/deployments\/([^/]+)\/redeploy$/);
     if (renderRedeployMatch) {
       const deployment = db.deployments.find((item) => item.id === renderRedeployMatch[1] || item.deploymentId === renderRedeployMatch[1]);
       if (!deployment) throw new Error('Deployment not found.');
       deployment.status = 'building';
       deployment.buildStatus = 'queued';
+      deployment.currentStep = 'Queued';
+      deployment.errorMessage = null;
       deployment.renderDeployId = createId('render_deploy');
       deployment.updatedAt = new Date().toISOString();
       deployment.lastDeployedAt = null;
@@ -132,6 +152,32 @@ export function createLocalDbRuntime({ makeSession, ttlToSeconds }) {
       return service;
     }
 
+    const hostingSuspendMatch = cleanPath.match(/^\/hosting\/([^/]+)\/suspend$/);
+    if (hostingSuspendMatch && method === 'POST') {
+      const service = findHostingService(db, hostingSuspendMatch[1]);
+      if (!service) throw new Error('Hosting service not found.');
+      service.status = 'suspended';
+      service.currentStep = 'Suspended';
+      service.suspendedAt = new Date().toISOString();
+      service.updatedAt = new Date().toISOString();
+      syncDeploymentFromHosting(db, service);
+      writeLocalDb(db);
+      return service;
+    }
+
+    const hostingDeleteMatch = cleanPath.match(/^\/hosting\/([^/]+)$/);
+    if (hostingDeleteMatch && method === 'DELETE') {
+      const service = findHostingService(db, hostingDeleteMatch[1]);
+      if (!service) throw new Error('Hosting service not found.');
+      service.status = 'deleted';
+      service.currentStep = 'Deleted';
+      service.deletedAt = new Date().toISOString();
+      service.updatedAt = new Date().toISOString();
+      syncDeploymentFromHosting(db, service);
+      writeLocalDb(db);
+      return { deleted: true, deploymentId: service.deploymentId };
+    }
+
     const hostingEnvMatch = cleanPath.match(/^\/hosting\/([^/]+)\/env$/);
     if (hostingEnvMatch) {
       const serviceId = hostingEnvMatch[1];
@@ -141,9 +187,9 @@ export function createLocalDbRuntime({ makeSession, ttlToSeconds }) {
         db.hostingEnv[serviceId] = [env, ...(db.hostingEnv[serviceId] || []).filter((item) => item.key !== env.key)];
         syncHostingMetadata(db, serviceId);
         writeLocalDb(db);
-        return env;
+        return publicHostingEnvVar(env);
       }
-      return db.hostingEnv[serviceId] || [];
+      return (db.hostingEnv[serviceId] || []).map(publicHostingEnvVar);
     }
 
     const hostingEnvKeyMatch = cleanPath.match(/^\/hosting\/([^/]+)\/env\/([^/]+)$/);
@@ -158,7 +204,7 @@ export function createLocalDbRuntime({ makeSession, ttlToSeconds }) {
         db.hostingEnv[serviceId] = [next, ...rows.filter((item) => item.key !== key)];
         syncHostingMetadata(db, serviceId);
         writeLocalDb(db);
-        return next;
+        return publicHostingEnvVar(next);
       }
       if (method === 'DELETE') {
         db.hostingEnv[serviceId] = rows.filter((item) => item.key !== key);
@@ -168,10 +214,21 @@ export function createLocalDbRuntime({ makeSession, ttlToSeconds }) {
       }
     }
 
+    const hostingEnvSyncMatch = cleanPath.match(/^\/hosting\/([^/]+)\/env\/sync$/);
+    if (hostingEnvSyncMatch && method === 'POST') {
+      const serviceId = hostingEnvSyncMatch[1];
+      ensureHostingCollections(db);
+      db.hostingEnv[serviceId] = (db.hostingEnv[serviceId] || []).map((item) => ({ ...item, renderSynced: true, requiresRedeploy: true, updatedAt: new Date().toISOString() }));
+      syncHostingMetadata(db, serviceId);
+      writeLocalDb(db);
+      return { synced: db.hostingEnv[serviceId].length, requiresRedeploy: db.hostingEnv[serviceId].some((item) => item.requiresRedeploy) };
+    }
+
     const hostingDiskMatch = cleanPath.match(/^\/hosting\/([^/]+)\/disk$/);
     if (hostingDiskMatch) {
       const serviceId = hostingDiskMatch[1];
       ensureHostingCollections(db);
+      if (method === 'GET') return db.hostingDisks[serviceId] || [];
       const service = findHostingService(db, serviceId);
       if (service?.serviceType !== 'web_service') throw new Error('Persistent disks are available for web apps, not static sites.');
       const disk = makeHostingDisk(body);
@@ -214,6 +271,22 @@ export function createLocalDbRuntime({ makeSession, ttlToSeconds }) {
       const serviceId = hostingDomainStatusMatch[1];
       ensureHostingCollections(db);
       const domainId = hostingDomainStatusMatch[2];
+      const domain = (db.hostingDomains[serviceId] || []).find((item) => item.domainId === domainId);
+      if (!domain) throw new Error('Domain not found.');
+      domain.verificationStatus = 'verified';
+      domain.sslStatus = 'issued';
+      domain.status = 'active';
+      domain.updatedAt = new Date().toISOString();
+      syncHostingMetadata(db, serviceId);
+      writeLocalDb(db);
+      return domain;
+    }
+
+    const hostingDomainVerifyMatch = cleanPath.match(/^\/hosting\/([^/]+)\/domains\/([^/]+)\/verify$/);
+    if (hostingDomainVerifyMatch && method === 'POST') {
+      const serviceId = hostingDomainVerifyMatch[1];
+      ensureHostingCollections(db);
+      const domainId = hostingDomainVerifyMatch[2];
       const domain = (db.hostingDomains[serviceId] || []).find((item) => item.domainId === domainId);
       if (!domain) throw new Error('Domain not found.');
       domain.verificationStatus = 'verified';
@@ -534,8 +607,14 @@ export function createLocalDbRuntime({ makeSession, ttlToSeconds }) {
       source: input.source || 'builder',
       status: 'building',
       buildStatus: 'queued',
+      currentStep: 'Queued',
       liveUrl: input.liveUrl || `https://${serviceSlug}.onrender.com`,
+      verifiedUrl: null,
+      urlReachable: false,
+      errorMessage: null,
       repoUrl: input.repoUrl || input.repositoryUrl || null,
+      githubRepo: input.githubRepo || input.repoUrl || input.repositoryUrl || null,
+      githubBranch: input.branch || input.productionBranch || 'main',
       sourceReference: input.sourceReference || input.siteId || input.repoUrl || 'builder',
       commitMessage: input.commitMessage || `Deploy ${serviceName}`,
       commitSha: 'renderlocal',
@@ -572,9 +651,15 @@ export function createLocalDbRuntime({ makeSession, ttlToSeconds }) {
       serviceType: deployment.serviceType,
       status: deployment.status,
       buildStatus: deployment.buildStatus,
+      currentStep: deployment.currentStep,
       liveUrl: deployment.liveUrl,
+      verifiedUrl: deployment.verifiedUrl,
+      urlReachable: deployment.urlReachable,
+      errorMessage: deployment.errorMessage,
       renderServiceId: deployment.renderServiceId,
       renderDeployId: deployment.renderDeployId,
+      githubRepo: deployment.githubRepo,
+      githubBranch: deployment.githubBranch,
       environmentConfiguration: deployment.environmentConfiguration,
       environmentVariablesMetadata: deployment.environmentVariablesMetadata,
       diskMetadata: deployment.diskMetadata,
@@ -616,7 +701,6 @@ export function createLocalDbRuntime({ makeSession, ttlToSeconds }) {
       id: input.id || createId('env'),
       key,
       valuePreview: redact(input.value || input.valuePreview || ''),
-      value: input.value || '********',
       environment: input.environment || 'production',
       encrypted: input.secret !== false,
       renderSynced: true,
@@ -707,6 +791,12 @@ export function createLocalDbRuntime({ makeSession, ttlToSeconds }) {
       status: service.status,
       buildStatus: service.buildStatus,
       liveUrl: service.liveUrl,
+      verifiedUrl: service.verifiedUrl,
+      urlReachable: service.urlReachable,
+      errorMessage: service.errorMessage,
+      currentStep: service.currentStep,
+      suspendedAt: service.suspendedAt,
+      deletedAt: service.deletedAt,
       environmentConfiguration: service.environmentConfiguration,
       environmentVariablesMetadata: service.environmentVariablesMetadata,
       diskMetadata: service.diskMetadata,
@@ -715,14 +805,29 @@ export function createLocalDbRuntime({ makeSession, ttlToSeconds }) {
     });
   }
 
+  function syncHostingServiceFromDeployment(db, deployment) {
+    const service = findHostingService(db, deployment.deploymentId || deployment.renderServiceId);
+    if (!service) return;
+    Object.assign(service, makeHostingServiceFromDeployment(deployment), {
+      environmentVariablesMetadata: service.environmentVariablesMetadata,
+      diskMetadata: service.diskMetadata,
+      domainMetadata: service.domainMetadata,
+    });
+  }
+
   function syncHostingMetadata(db, serviceId) {
     const service = findHostingService(db, serviceId);
     if (!service) return;
-    service.environmentVariablesMetadata = (db.hostingEnv[serviceId] || []).map(({ value, ...rest }) => rest);
+    service.environmentVariablesMetadata = (db.hostingEnv[serviceId] || []).map(publicHostingEnvVar);
     service.diskMetadata = db.hostingDisks[serviceId] || [];
     service.domainMetadata = db.hostingDomains[serviceId] || [];
     service.updatedAt = new Date().toISOString();
     syncDeploymentFromHosting(db, service);
+  }
+
+  function publicHostingEnvVar(item = {}) {
+    const { value, valueCiphertext, valuePlaintext, ...safe } = item;
+    return safe;
   }
 
   function pickDeploymentStatus(deployment) {
@@ -731,9 +836,13 @@ export function createLocalDbRuntime({ makeSession, ttlToSeconds }) {
       deploymentSessionId: deployment.deploymentSessionId,
       status: deployment.status,
       buildStatus: deployment.buildStatus,
+      currentStep: deployment.currentStep,
       liveUrl: deployment.liveUrl,
       renderServiceId: deployment.renderServiceId,
       renderDeployId: deployment.renderDeployId,
+      verifiedUrl: deployment.verifiedUrl,
+      urlReachable: deployment.urlReachable,
+      errorMessage: deployment.errorMessage,
       updatedAt: deployment.updatedAt,
     };
   }

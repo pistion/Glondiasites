@@ -55,8 +55,14 @@ class DeploymentService {
       serviceType,
       status: renderDeployId ? 'building' : 'configuration_required',
       buildStatus: renderDeployId ? 'queued' : 'waiting_for_render_credentials',
+      currentStep: renderDeployId ? 'Queued' : 'Preparing',
       liveUrl,
+      verifiedUrl: null,
+      urlReachable: false,
+      errorMessage: renderDeployId ? null : 'Render credentials or service configuration are required before the deploy can run.',
       repoUrl: input.repoUrl || input.repositoryUrl || null,
+      githubRepo: input.githubRepo || input.repo || input.repository || input.repoUrl || input.repositoryUrl || null,
+      githubBranch: input.branch || input.productionBranch || 'main',
       sourceReference,
       environmentVariablesMetadata: [],
       diskMetadata: [],
@@ -107,8 +113,34 @@ class DeploymentService {
       liveUrl: refreshed.liveUrl,
       renderServiceId: refreshed.renderServiceId,
       renderDeployId: refreshed.renderDeployId,
+      currentStep: refreshed.currentStep,
+      verifiedUrl: refreshed.verifiedUrl,
+      urlReachable: refreshed.urlReachable,
+      errorMessage: refreshed.errorMessage,
       updatedAt: refreshed.updatedAt,
     };
+  }
+
+  async verifyUrl(deploymentId) {
+    const deployment = await this.getDeployment(deploymentId);
+    const liveUrl = deployment.liveUrl || await this.resolveLiveUrl(deployment);
+    const verification = await deploymentStatusService.verifyLiveUrl(liveUrl);
+    return mutateHostingStore((store) => {
+      const stored = store.deployments.find((item) => item.deploymentId === deployment.deploymentId);
+      if (!stored) return deployment;
+      stored.liveUrl = liveUrl || stored.liveUrl;
+      stored.verifiedUrl = verification.ok ? liveUrl : stored.verifiedUrl;
+      stored.urlReachable = Boolean(verification.ok);
+      stored.status = verification.ok ? 'live' : (stored.status === 'live' ? 'deployed' : stored.status);
+      stored.currentStep = verification.ok ? 'Live' : 'Verifying URL';
+      stored.errorMessage = verification.ok ? null : (verification.error || 'The hosted URL is not reachable yet. It may still be warming up.');
+      stored.updatedAt = nowIso();
+      store.logs[stored.deploymentId] = [
+        makeLog(verification.ok ? `Verified live URL ${liveUrl}.` : `URL verification is still warming up for ${liveUrl || 'the hosted app'}.`, verification.ok ? 'ok' : 'warn'),
+        ...(store.logs[stored.deploymentId] || []),
+      ];
+      return stored;
+    });
   }
 
   async redeploy(deploymentId, input = {}) {
@@ -126,6 +158,8 @@ class DeploymentService {
         renderDeployId,
         status: 'building',
         buildStatus: 'queued',
+        currentStep: deployResponse?.status === 'configuration_required' ? 'Preparing' : 'Queued',
+        errorMessage: deployResponse?.status === 'configuration_required' ? deployResponse.message : null,
         updatedAt: nowIso(),
       });
       store.logs[deployment.deploymentId] = [
@@ -139,6 +173,13 @@ class DeploymentService {
   async getLogs(deploymentId) {
     const store = await readHostingStore();
     return store.logs[deploymentId] || [];
+  }
+
+  async resolveLiveUrl(deployment) {
+    if (deployment.liveUrl) return deployment.liveUrl;
+    if (!deployment.renderServiceId || !renderApiService.configured()) return null;
+    const service = await renderApiService.getService(deployment.renderServiceId);
+    return service?.service?.serviceDetails?.url || service?.serviceDetails?.url || service?.url || null;
   }
 }
 

@@ -1597,19 +1597,9 @@ function PublishModal({ onClose, content, tpl, siteSlug, navigate, existingSiteI
         outputDirectory: content._sandboxOutputDirectory || 'dist',
         environment: 'production',
       });
-      setDeployResult(deployment || published?.renderDeploy || null);
-      if (deployment?.liveUrl) {
-        setLiveUrl(deployment.liveUrl);
-      } else if (published?.liveUrl) {
-        setLiveUrl(published.liveUrl);
-      } else if (published?.slug) {
-        setLiveUrl(`https://${published.slug}.glondia.app`);
-      } else if (window.location?.origin) {
-        setLiveUrl(window.location.origin);
-      }
-
       onPublished?.(sid, pid);
-      setPhase("done");
+      onClose();
+      navigate({ view: "hosting-detail", params: { id: deployment.deploymentId } });
     } catch (err) {
       setPublishError(err.message || "Publish failed. Please try again.");
       setPhase("review");
@@ -1674,8 +1664,8 @@ function PublishModal({ onClose, content, tpl, siteSlug, navigate, existingSiteI
             }}>
               <ICN.Rocket size={28} />
             </div>
-            <h3 style={{ fontFamily: "var(--serif)", fontWeight: 400, fontSize: 26, margin: 0 }}>Building your site…</h3>
-            <div className="muted" style={{ marginTop: 8 }}>Configuring hosting, deployment, SSL, and the live Render link.</div>
+            <h3 style={{ fontFamily: "var(--serif)", fontWeight: 400, fontSize: 26, margin: 0 }}>Starting deployment…</h3>
+            <div className="muted" style={{ marginTop: 8 }}>Creating the hosting app and moving you to Hosting for live monitoring.</div>
             <div style={{ marginTop: 18, display: "grid", gap: 8, textAlign: "left" }}>
               {[
                 'Saving latest customer content',

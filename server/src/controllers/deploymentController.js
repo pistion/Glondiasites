@@ -38,6 +38,14 @@ const deploymentController = {
     }
   },
 
+  verifyUrl: async (req, res, next) => {
+    try {
+      res.ok(await deploymentService.verifyUrl(req.params.deploymentId));
+    } catch (error) {
+      next(error);
+    }
+  },
+
   getLogs: async (req, res, next) => {
     try {
       res.ok(await deploymentService.getLogs(req.params.deploymentId));
@@ -48,4 +56,3 @@ const deploymentController = {
 };
 
 export default deploymentController;
-
