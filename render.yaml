@@ -21,5 +21,7 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: VITE_APP_MODE
+        value: live
       - key: DATA_DIR
         value: /var/glondia/data

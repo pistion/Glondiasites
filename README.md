@@ -98,6 +98,7 @@ Required base environment:
 | Variable | Purpose |
 |---|---|
 | `NODE_ENV=production` | production runtime |
+| `VITE_APP_MODE=live` | build-time client mode that allows calls to the Express provider APIs |
 | `DATA_DIR=/var/glondia/data` | persistent sandbox/import data on Render disk |
 
 Render integration variables:
