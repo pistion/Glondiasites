@@ -5,7 +5,7 @@ import { GD } from './data';
 import { StatusBadge, Tabs, Stat, Badge, Empty } from './components';
 import { useProjects } from './use-projects';
 import { useDeploymentLogs, useProjectArtifacts, useProjectDeployments, useProjectEnvVars } from './use-project-detail-data';
-import { archiveProject, cancelDeployment, connectGitHubUrl, createDeployment, createEnvVar, createProject, deleteDomain, deleteEnvVar, disconnectGitHub, exportEnvVars, getGitHubStatus, linkProjectRepo, listGitHubBranches, listGitHubRepos, parseGitHubRepository, rollbackDeployment, updateDomain, updateEnvVar, updateProject } from './api';
+import { archiveProject, attachHostingDisk, cancelDeployment, connectGitHubUrl, createDeployment, createEnvVar, createProject, deleteDomain, deleteEnvVar, disconnectGitHub, exportEnvVars, getGitHubStatus, linkProjectRepo, listGitHubBranches, listGitHubRepos, listHostingDeployments, parseGitHubRepository, rollbackDeployment, updateDomain, updateEnvVar, updateProject, upsertHostingEnvVar, addHostingDomain, verifyHostingDomain } from './api';
 import { useDomains } from './use-domains';
 
 export function HostingList({ navigate }) {
@@ -14,6 +14,7 @@ export function HostingList({ navigate }) {
   const [showImport, setShowImport] = useStateH(false);
   const [creating, setCreating] = useStateH(false);
   const [createError, setCreateError] = useStateH(null);
+  const [hostingServices, setHostingServices] = useStateH([]);
   const [projectForm, setProjectForm] = useStateH({
     name: '',
     framework: 'Next.js',
@@ -25,6 +26,12 @@ export function HostingList({ navigate }) {
   const updateProjectForm = (field, value) => {
     setProjectForm((current) => ({ ...current, [field]: value }));
   };
+
+  React.useEffect(() => {
+    listHostingDeployments()
+      .then((items) => setHostingServices(items || []))
+      .catch(() => setHostingServices([]));
+  }, []);
 
   const handleCreateProject = async (event) => {
     event.preventDefault();
@@ -78,6 +85,38 @@ export function HostingList({ navigate }) {
       {error && (
         <div className="card" style={{ padding: "10px 14px", fontSize: 13, color: "var(--text-muted)" }}>
           Showing local workspace data.
+        </div>
+      )}
+      {hostingServices.length > 0 && (
+        <div className="card card-flush">
+          <div className="card-head">
+            <h2>Managed Render hosting</h2>
+            <span className="meta">{hostingServices.length} deployed service{hostingServices.length === 1 ? '' : 's'}</span>
+          </div>
+          <table className="tbl">
+            <thead><tr><th>Service</th><th>Status</th><th>Build</th><th>Live URL</th><th>Settings</th></tr></thead>
+            <tbody>
+              {hostingServices.map((service) => (
+                <tr key={service.serviceId}>
+                  <td>
+                    <div style={{ fontWeight: 600 }}>{service.serviceName}</div>
+                    <div className="mono faint" style={{ fontSize: 12 }}>{service.serviceId}</div>
+                  </td>
+                  <td><StatusBadge value={service.status} /></td>
+                  <td className="mono">{service.buildStatus}</td>
+                  <td>{service.liveUrl ? <a className="mono" href={service.liveUrl} target="_blank" rel="noopener noreferrer">{service.liveUrl.replace(/^https?:\/\//, '')}</a> : <span className="faint">Pending</span>}</td>
+                  <td>
+                    <div className="row" style={{ gap: 6 }}>
+                      <Badge tone="info" dot={false}>{service.serviceType}</Badge>
+                      <span className="faint">{(service.environmentVariablesMetadata || []).length} env</span>
+                      <span className="faint">{(service.diskMetadata || []).length} disks</span>
+                      <span className="faint">{(service.domainMetadata || []).length} domains</span>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
       {showCreate && (
@@ -259,11 +298,12 @@ export function HostingDetail({ id, navigate }) {
       {deployError && <div className="card" style={{ padding: "10px 14px", color: "var(--danger)", fontSize: 13 }}>{deployError}</div>}
 
       <Tabs value={tab} onChange={setTab}
-        options={["Deployments", "Build logs", "Environment variables", "Environments", "Domains", "Analytics", "Settings"]} />
+        options={["Deployments", "Build logs", "Environment variables", "Persistent disk", "Environments", "Domains", "Analytics", "Settings"]} />
 
       {tab === "Deployments" && <DeploymentsTab p={p} />}
       {tab === "Build logs" && <BuildLogsTab p={p} onRedeploy={handleDeploy} deploying={deploying} />}
       {tab === "Environment variables" && <EnvVarsTab projectId={p.id} project={p} />}
+      {tab === "Persistent disk" && <PersistentDiskTab project={p} />}
       {tab === "Environments" && <EnvsTab />}
       {tab === "Domains" && <ProjectDomainsTabIntegrated p={p} navigate={navigate} />}
       {tab === "Analytics" && <ProjectAnalyticsTab p={p} />}
@@ -681,6 +721,177 @@ function Field({ label, value, mono }) {
       <div className={mono ? "mono" : ""} style={{ background: "var(--bg-deep)", border: "1px solid var(--border)", borderRadius: "var(--r-sm)", padding: "10px 12px", fontSize: 13 }}>
         {value}
       </div>
+    </div>
+  );
+}
+
+function PersistentDiskTab({ project }) {
+  const [services, setServices] = useStateH([]);
+  const [serviceId, setServiceId] = useStateH(project.renderServiceId || '');
+  const [diskForm, setDiskForm] = useStateH({ name: 'data', mountPath: '/var/data', sizeGB: 1 });
+  const [envForm, setEnvForm] = useStateH({ key: 'NODE_ENV', value: 'production' });
+  const [domainName, setDomainName] = useStateH('');
+  const [message, setMessage] = useStateH('');
+  const [error, setError] = useStateH('');
+  const service = services.find((item) => item.serviceId === serviceId) || services.find((item) => item.projectId === project.id) || null;
+  const selectedServiceId = serviceId || service?.serviceId || project.renderServiceId || '';
+  const supportsDisk = (service?.serviceType || 'static_site') === 'web_service';
+
+  React.useEffect(() => {
+    listHostingDeployments()
+      .then((items) => {
+        setServices(items || []);
+        const match = (items || []).find((item) => item.projectId === project.id || item.serviceId === project.renderServiceId);
+        if (match && !serviceId) setServiceId(match.serviceId);
+      })
+      .catch(() => setServices([]));
+  }, [project.id, project.renderServiceId]);
+
+  const refresh = async () => {
+    const items = await listHostingDeployments();
+    setServices(items || []);
+  };
+
+  const saveEnv = async (event) => {
+    event.preventDefault();
+    setMessage(''); setError('');
+    try {
+      await upsertHostingEnvVar(selectedServiceId, envForm);
+      await refresh();
+      setMessage('Environment variable synced. Redeploy the service for runtime changes to apply.');
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const attachDisk = async (event) => {
+    event.preventDefault();
+    setMessage(''); setError('');
+    try {
+      await attachHostingDisk(selectedServiceId, diskForm);
+      await refresh();
+      setMessage('Persistent disk attached to the hosting service.');
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const addDomain = async (event) => {
+    event.preventDefault();
+    setMessage(''); setError('');
+    try {
+      await addHostingDomain(selectedServiceId, { domain: domainName });
+      setDomainName('');
+      await refresh();
+      setMessage('Domain added. Add the DNS records shown below, then retry verification.');
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const verifyDomain = async (domainId) => {
+    setMessage(''); setError('');
+    try {
+      await verifyHostingDomain(selectedServiceId, domainId);
+      await refresh();
+      setMessage('Domain verification refreshed.');
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  if (!selectedServiceId) {
+    return (
+      <div className="card">
+        <Empty icon="Server" title="No Render hosting service yet" body="Deploy this project from the builder or trigger a production deploy before editing Render-specific settings." />
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid-side">
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div className="card">
+          <div className="row between" style={{ marginBottom: 12 }}>
+            <div>
+              <h2 style={{ margin: 0 }}>Render service controls</h2>
+              <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>Managed through Glondia, with Render IDs kept for support and sync.</div>
+            </div>
+            <Badge tone={supportsDisk ? "success" : "warn"} dot={false}>{service?.serviceType || 'static_site'}</Badge>
+          </div>
+          <div className="kv" style={{ gridTemplateColumns: "140px 1fr" }}>
+            <dt>Service ID</dt><dd className="mono">{selectedServiceId}</dd>
+            <dt>Live URL</dt><dd>{service?.liveUrl ? <a className="mono" href={service.liveUrl} target="_blank" rel="noopener noreferrer">{service.liveUrl}</a> : <span className="faint">Pending deployment</span>}</dd>
+            <dt>Build status</dt><dd><StatusBadge value={service?.buildStatus || 'Queued'} /></dd>
+          </div>
+        </div>
+
+        <form className="card" onSubmit={saveEnv}>
+          <h2 style={{ marginTop: 0 }}>Environment variables</h2>
+          <div className="grid-2" style={{ gap: 12 }}>
+            <div><label className="label">Key</label><input className="input mono" value={envForm.key} onChange={(e) => setEnvForm({ ...envForm, key: e.target.value })} /></div>
+            <div><label className="label">Value</label><input className="input mono" value={envForm.value} onChange={(e) => setEnvForm({ ...envForm, value: e.target.value })} /></div>
+          </div>
+          <div className="row" style={{ justifyContent: "flex-end", marginTop: 12 }}><button className="btn btn-primary">Sync variable</button></div>
+          <MetadataList items={service?.environmentVariablesMetadata || []} empty="No hosting env vars synced yet." />
+        </form>
+
+        <form className="card" onSubmit={attachDisk}>
+          <h2 style={{ marginTop: 0 }}>SSD / persistent disk</h2>
+          {!supportsDisk && <div className="muted" style={{ color: "var(--warning)", marginBottom: 12 }}>This selected Render service type does not support persistent disks.</div>}
+          <div className="grid-3" style={{ gap: 12 }}>
+            <div><label className="label">Disk name</label><input className="input mono" value={diskForm.name} onChange={(e) => setDiskForm({ ...diskForm, name: e.target.value })} /></div>
+            <div><label className="label">Mount path</label><input className="input mono" value={diskForm.mountPath} onChange={(e) => setDiskForm({ ...diskForm, mountPath: e.target.value })} /></div>
+            <div><label className="label">Size GB</label><input className="input mono" type="number" min="1" max="1024" value={diskForm.sizeGB} onChange={(e) => setDiskForm({ ...diskForm, sizeGB: Number(e.target.value) })} /></div>
+          </div>
+          <div className="row" style={{ justifyContent: "flex-end", marginTop: 12 }}><button className="btn btn-primary" disabled={!supportsDisk}>Attach disk</button></div>
+          <MetadataList items={service?.diskMetadata || []} empty="No disk attached." />
+        </form>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <form className="card" onSubmit={addDomain}>
+          <h2 style={{ marginTop: 0 }}>Custom domains</h2>
+          <label className="label">Domain</label>
+          <div className="row" style={{ gap: 8 }}>
+            <input className="input mono" placeholder="example.com" value={domainName} onChange={(e) => setDomainName(e.target.value)} />
+            <button className="btn btn-primary">Add</button>
+          </div>
+        </form>
+
+        {(service?.domainMetadata || []).map((domain) => (
+          <div className="card" key={domain.domainId}>
+            <div className="row between">
+              <div>
+                <div className="mono" style={{ fontWeight: 700 }}>{domain.name}</div>
+                <div className="muted" style={{ fontSize: 13 }}>DNS {domain.verificationStatus} · SSL {domain.sslStatus}</div>
+              </div>
+              <button className="btn btn-sm btn-outline" onClick={() => verifyDomain(domain.domainId)}>Retry verification</button>
+            </div>
+            <table className="tbl" style={{ marginTop: 12 }}>
+              <thead><tr><th>Type</th><th>Name</th><th>Value</th></tr></thead>
+              <tbody>{(domain.dnsRecords || []).map((record, index) => <tr key={index}><td>{record.type}</td><td className="mono">{record.name}</td><td className="mono">{record.value}</td></tr>)}</tbody>
+            </table>
+          </div>
+        ))}
+
+        {message && <div className="card" style={{ color: "var(--accent)", fontSize: 13 }}>{message}</div>}
+        {error && <div className="card" style={{ color: "var(--danger)", fontSize: 13 }}>{error}</div>}
+      </div>
+    </div>
+  );
+}
+
+function MetadataList({ items, empty }) {
+  if (!items?.length) return <div className="faint" style={{ fontSize: 13, marginTop: 12 }}>{empty}</div>;
+  return (
+    <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+      {items.map((item) => (
+        <div key={item.key || item.diskId || item.domainId || item.name} className="row between" style={{ padding: "8px 10px", border: "1px solid var(--border)", borderRadius: "var(--r-sm)" }}>
+          <span className="mono">{item.key || item.name}</span>
+          <span className="faint">{item.valuePreview || item.mountPath || item.status}</span>
+        </div>
+      ))}
     </div>
   );
 }

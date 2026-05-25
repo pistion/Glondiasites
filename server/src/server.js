@@ -27,6 +27,11 @@ import analyticsRoutes from './routes/analytics.routes.js';
 import billingRoutes from './routes/billing.routes.js';
 import settingsRoutes from './routes/settings.routes.js';
 import eventStreamRoutes from './routes/event-stream.routes.js';
+import deploymentRoutes from './routes/deploymentRoutes.js';
+import hostingRoutes from './routes/hostingRoutes.js';
+import environmentRoutes from './routes/environmentRoutes.js';
+import domainHostingRoutes from './routes/domainRoutes.js';
+import diskRoutes from './routes/diskRoutes.js';
 
 dotenv.config({ path: '.env.local' });
 dotenv.config();
@@ -330,6 +335,13 @@ app.use('/api/v1/workspaces/:workspaceId/analytics', analyticsRoutes);
 app.use('/api/v1/workspaces/:workspaceId/billing', billingRoutes);
 app.use('/api/v1/workspaces/:workspaceId/settings', settingsRoutes);
 app.use('/api/v1/workspaces/:workspaceId/events', eventStreamRoutes);
+
+// Render-powered customer hosting surface used by the site builder and hosting dashboard.
+app.use('/api/deployments', deploymentRoutes);
+app.use('/api/hosting', hostingRoutes);
+app.use('/api/hosting', environmentRoutes);
+app.use('/api/hosting', diskRoutes);
+app.use('/api/hosting', domainHostingRoutes);
 
 // ── SPA fallback — serve Vite dist for everything else ──────────────────────
 app.use((req, res) => serveStatic(req, res));

@@ -53,6 +53,189 @@ export function createLocalDbRuntime({ makeSession, ttlToSeconds }) {
     const deploymentLogsMatch = cleanPath.match(/^\/deployments\/([^/]+)\/logs$/);
     if (deploymentLogsMatch) return db.logs[deploymentLogsMatch[1]] || [];
 
+    if (cleanPath === '/deployments') {
+      if (method === 'POST') {
+        ensureHostingCollections(db);
+        const deployment = makeRenderDeployment(body);
+        db.deployments.unshift(deployment);
+        db.hostingServices.unshift(makeHostingServiceFromDeployment(deployment));
+        db.logs[deployment.id] = [
+          makeLog('Deployment session created.'),
+          makeLog('Preparing Render hosting environment.'),
+          makeLog(`Build queued for ${deployment.serviceName}.`),
+        ];
+        const site = body.siteId ? db.sites.find((item) => item.id === body.siteId) : null;
+        if (site) {
+          site.status = 'published';
+          site.renderServiceId = deployment.renderServiceId;
+          site.liveUrl = deployment.liveUrl;
+          site.deploymentSessionId = deployment.deploymentSessionId;
+          site.updatedAt = new Date().toISOString();
+        }
+        writeLocalDb(db);
+        return deployment;
+      }
+      return db.deployments;
+    }
+
+    const renderDeploymentMatch = cleanPath.match(/^\/deployments\/([^/]+)$/);
+    if (renderDeploymentMatch) {
+      const deployment = db.deployments.find((item) => item.id === renderDeploymentMatch[1] || item.deploymentId === renderDeploymentMatch[1]);
+      if (!deployment) throw new Error('Deployment not found.');
+      return deployment;
+    }
+
+    const renderDeploymentStatusMatch = cleanPath.match(/^\/deployments\/([^/]+)\/status$/);
+    if (renderDeploymentStatusMatch) {
+      const deployment = db.deployments.find((item) => item.id === renderDeploymentStatusMatch[1] || item.deploymentId === renderDeploymentStatusMatch[1]);
+      if (!deployment) throw new Error('Deployment not found.');
+      deployment.status = deployment.status === 'queued' ? 'building' : deployment.status === 'building' ? 'deployed' : deployment.status;
+      deployment.buildStatus = deployment.status === 'deployed' ? 'succeeded' : deployment.status;
+      deployment.updatedAt = new Date().toISOString();
+      writeLocalDb(db);
+      return pickDeploymentStatus(deployment);
+    }
+
+    const renderRedeployMatch = cleanPath.match(/^\/deployments\/([^/]+)\/redeploy$/);
+    if (renderRedeployMatch) {
+      const deployment = db.deployments.find((item) => item.id === renderRedeployMatch[1] || item.deploymentId === renderRedeployMatch[1]);
+      if (!deployment) throw new Error('Deployment not found.');
+      deployment.status = 'building';
+      deployment.buildStatus = 'queued';
+      deployment.renderDeployId = createId('render_deploy');
+      deployment.updatedAt = new Date().toISOString();
+      deployment.lastDeployedAt = null;
+      db.logs[deployment.id] = [makeLog('Redeploy requested.'), ...(db.logs[deployment.id] || [])];
+      writeLocalDb(db);
+      return deployment;
+    }
+
+    if (cleanPath === '/hosting') {
+      ensureHostingCollections(db);
+      return db.hostingServices || [];
+    }
+
+    const hostingServiceMatch = cleanPath.match(/^\/hosting\/([^/]+)$/);
+    if (hostingServiceMatch) {
+      const service = findHostingService(db, hostingServiceMatch[1]);
+      if (!service) throw new Error('Hosting service not found.');
+      return service;
+    }
+
+    const hostingSettingsMatch = cleanPath.match(/^\/hosting\/([^/]+)\/settings$/);
+    if (hostingSettingsMatch) {
+      const service = findHostingService(db, hostingSettingsMatch[1]);
+      if (!service) throw new Error('Hosting service not found.');
+      Object.assign(service.environmentConfiguration, body, { updatedAt: new Date().toISOString() });
+      syncDeploymentFromHosting(db, service);
+      writeLocalDb(db);
+      return service;
+    }
+
+    const hostingEnvMatch = cleanPath.match(/^\/hosting\/([^/]+)\/env$/);
+    if (hostingEnvMatch) {
+      const serviceId = hostingEnvMatch[1];
+      ensureHostingCollections(db);
+      if (method === 'POST') {
+        const env = makeHostingEnvVar(body);
+        db.hostingEnv[serviceId] = [env, ...(db.hostingEnv[serviceId] || []).filter((item) => item.key !== env.key)];
+        syncHostingMetadata(db, serviceId);
+        writeLocalDb(db);
+        return env;
+      }
+      return db.hostingEnv[serviceId] || [];
+    }
+
+    const hostingEnvKeyMatch = cleanPath.match(/^\/hosting\/([^/]+)\/env\/([^/]+)$/);
+    if (hostingEnvKeyMatch) {
+      const serviceId = hostingEnvKeyMatch[1];
+      ensureHostingCollections(db);
+      const key = decodeURIComponent(hostingEnvKeyMatch[2]).toUpperCase();
+      const rows = db.hostingEnv[serviceId] || [];
+      const row = rows.find((item) => item.key === key);
+      if (method === 'PATCH') {
+        const next = makeHostingEnvVar({ ...row, ...body, key });
+        db.hostingEnv[serviceId] = [next, ...rows.filter((item) => item.key !== key)];
+        syncHostingMetadata(db, serviceId);
+        writeLocalDb(db);
+        return next;
+      }
+      if (method === 'DELETE') {
+        db.hostingEnv[serviceId] = rows.filter((item) => item.key !== key);
+        syncHostingMetadata(db, serviceId);
+        writeLocalDb(db);
+        return { deleted: true };
+      }
+    }
+
+    const hostingDiskMatch = cleanPath.match(/^\/hosting\/([^/]+)\/disk$/);
+    if (hostingDiskMatch) {
+      const serviceId = hostingDiskMatch[1];
+      ensureHostingCollections(db);
+      const service = findHostingService(db, serviceId);
+      if (service?.serviceType !== 'web_service') throw new Error('Persistent disks are available for web apps, not static sites.');
+      const disk = makeHostingDisk(body);
+      db.hostingDisks[serviceId] = [disk, ...(db.hostingDisks[serviceId] || [])];
+      syncHostingMetadata(db, serviceId);
+      writeLocalDb(db);
+      return disk;
+    }
+
+    const hostingDiskIdMatch = cleanPath.match(/^\/hosting\/([^/]+)\/disk\/([^/]+)$/);
+    if (hostingDiskIdMatch) {
+      const serviceId = hostingDiskIdMatch[1];
+      ensureHostingCollections(db);
+      const diskId = hostingDiskIdMatch[2];
+      const rows = db.hostingDisks[serviceId] || [];
+      const disk = rows.find((item) => item.diskId === diskId);
+      if (method === 'PATCH') Object.assign(disk, body, { updatedAt: new Date().toISOString() });
+      if (method === 'DELETE') db.hostingDisks[serviceId] = rows.filter((item) => item.diskId !== diskId);
+      syncHostingMetadata(db, serviceId);
+      writeLocalDb(db);
+      return method === 'DELETE' ? { deleted: true } : disk;
+    }
+
+    const hostingDomainsMatch = cleanPath.match(/^\/hosting\/([^/]+)\/domains$/);
+    if (hostingDomainsMatch) {
+      const serviceId = hostingDomainsMatch[1];
+      ensureHostingCollections(db);
+      if (method === 'POST') {
+        const domain = makeHostingDomain(body);
+        db.hostingDomains[serviceId] = [domain, ...(db.hostingDomains[serviceId] || [])];
+        syncHostingMetadata(db, serviceId);
+        writeLocalDb(db);
+        return domain;
+      }
+      return db.hostingDomains[serviceId] || [];
+    }
+
+    const hostingDomainStatusMatch = cleanPath.match(/^\/hosting\/([^/]+)\/domains\/([^/]+)\/status$/);
+    if (hostingDomainStatusMatch) {
+      const serviceId = hostingDomainStatusMatch[1];
+      ensureHostingCollections(db);
+      const domainId = hostingDomainStatusMatch[2];
+      const domain = (db.hostingDomains[serviceId] || []).find((item) => item.domainId === domainId);
+      if (!domain) throw new Error('Domain not found.');
+      domain.verificationStatus = 'verified';
+      domain.sslStatus = 'issued';
+      domain.status = 'active';
+      domain.updatedAt = new Date().toISOString();
+      syncHostingMetadata(db, serviceId);
+      writeLocalDb(db);
+      return domain;
+    }
+
+    const hostingDomainDeleteMatch = cleanPath.match(/^\/hosting\/([^/]+)\/domains\/([^/]+)$/);
+    if (hostingDomainDeleteMatch && method === 'DELETE') {
+      const serviceId = hostingDomainDeleteMatch[1];
+      ensureHostingCollections(db);
+      const domainId = hostingDomainDeleteMatch[2];
+      db.hostingDomains[serviceId] = (db.hostingDomains[serviceId] || []).filter((item) => item.domainId !== domainId);
+      syncHostingMetadata(db, serviceId);
+      writeLocalDb(db);
+      return { deleted: true };
+    }
+
     const artifactsMatch = cleanPath.match(/^\/projects\/([^/]+)\/artifacts$/);
     if (artifactsMatch) return db.artifacts.filter((item) => item.projectId === artifactsMatch[1]);
 
@@ -246,6 +429,10 @@ export function createLocalDbRuntime({ makeSession, ttlToSeconds }) {
       activity: [makeActivity('app.ready', 'Clean Vite React workspace is ready.', 'workspace', 'local-org')],
       audit: [],
       renderServices: [{ id: 'local-static', name: 'Glondia Static App', type: 'web_service', region: 'oregon' }],
+      hostingServices: [],
+      hostingEnv: {},
+      hostingDisks: {},
+      hostingDomains: {},
       billing: {
         subscription: {
           status: 'active',
@@ -327,6 +514,77 @@ export function createLocalDbRuntime({ makeSession, ttlToSeconds }) {
     };
   }
 
+  function makeRenderDeployment(input = {}) {
+    const now = new Date().toISOString();
+    const serviceName = input.serviceName || input.name || input.slug || 'Glondia site';
+    const deploymentId = input.deploymentId || createId('dep');
+    const serviceType = input.serviceType || (input.startCommand ? 'web_service' : 'static_site');
+    const serviceSlug = slugify(serviceName);
+    return {
+      id: deploymentId,
+      deploymentId,
+      userId: 'local-user',
+      projectId: input.projectId || input.siteId || null,
+      renderServiceId: input.renderServiceId || createId('render_srv'),
+      renderDeployId: createId('render_deploy'),
+      deploymentSessionId: createId('session'),
+      serviceName,
+      serviceType,
+      environment: input.environment || 'production',
+      source: input.source || 'builder',
+      status: 'building',
+      buildStatus: 'queued',
+      liveUrl: input.liveUrl || `https://${serviceSlug}.onrender.com`,
+      repoUrl: input.repoUrl || input.repositoryUrl || null,
+      sourceReference: input.sourceReference || input.siteId || input.repoUrl || 'builder',
+      commitMessage: input.commitMessage || `Deploy ${serviceName}`,
+      commitSha: 'renderlocal',
+      branch: input.branch || input.productionBranch || 'main',
+      durationMs: 0,
+      provider: 'render',
+      providerServiceId: input.renderServiceId || null,
+      providerDeployId: null,
+      providerStatus: 'building',
+      environmentVariablesMetadata: [],
+      diskMetadata: [],
+      domainMetadata: [],
+      deploymentLogsReference: deploymentId,
+      environmentConfiguration: {
+        branch: input.branch || input.productionBranch || 'main',
+        rootDirectory: input.rootDirectory || '',
+        buildCommand: input.buildCommand || null,
+        startCommand: input.startCommand || null,
+        outputDirectory: input.outputDirectory || null,
+      },
+      createdAt: now,
+      updatedAt: now,
+      lastDeployedAt: null,
+      artifacts: [makeArtifact(input.projectId || input.siteId || 'builder', deploymentId)],
+    };
+  }
+
+  function makeHostingServiceFromDeployment(deployment) {
+    return {
+      serviceId: deployment.renderServiceId,
+      deploymentId: deployment.deploymentId,
+      projectId: deployment.projectId,
+      serviceName: deployment.serviceName,
+      serviceType: deployment.serviceType,
+      status: deployment.status,
+      buildStatus: deployment.buildStatus,
+      liveUrl: deployment.liveUrl,
+      renderServiceId: deployment.renderServiceId,
+      renderDeployId: deployment.renderDeployId,
+      environmentConfiguration: deployment.environmentConfiguration,
+      environmentVariablesMetadata: deployment.environmentVariablesMetadata,
+      diskMetadata: deployment.diskMetadata,
+      domainMetadata: deployment.domainMetadata,
+      createdAt: deployment.createdAt,
+      updatedAt: deployment.updatedAt,
+      lastDeployedAt: deployment.lastDeployedAt,
+    };
+  }
+
   function makeArtifact(projectId, deploymentId = createId('dep')) {
     return {
       id: createId('artifact'),
@@ -348,6 +606,50 @@ export function createLocalDbRuntime({ makeSession, ttlToSeconds }) {
       key: String(input.key || 'VITE_APP_MODE').toUpperCase(),
       value: input.value || 'demo',
       environment: input.environment || 'production',
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  function makeHostingEnvVar(input = {}) {
+    const key = String(input.key || 'VITE_APP_MODE').trim().toUpperCase();
+    return {
+      id: input.id || createId('env'),
+      key,
+      valuePreview: redact(input.value || input.valuePreview || ''),
+      value: input.value || '********',
+      environment: input.environment || 'production',
+      encrypted: input.secret !== false,
+      renderSynced: true,
+      requiresRedeploy: true,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  function makeHostingDisk(input = {}) {
+    return {
+      diskId: input.diskId || createId('disk'),
+      name: input.name || input.diskName || 'data',
+      mountPath: input.mountPath || '/var/data',
+      sizeGB: Number(input.sizeGB || input.size || 1),
+      status: 'attached',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  function makeHostingDomain(input = {}) {
+    const name = String(input.domain || input.name || input.hostname || 'example.com').toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+    return {
+      domainId: input.domainId || createId('domain'),
+      name,
+      status: 'pending_verification',
+      verificationStatus: 'pending',
+      sslStatus: 'pending',
+      dnsRecords: [
+        { type: 'A', name: '@', value: '216.24.57.1', ttl: 300 },
+        { type: 'CNAME', name: 'www', value: `${slugify(name)}.onrender.com`, ttl: 300 },
+      ],
+      createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
   }
@@ -385,6 +687,60 @@ export function createLocalDbRuntime({ makeSession, ttlToSeconds }) {
       makeDnsRecord({ type: 'A', name: '@', value: '216.24.57.1' }),
       makeDnsRecord({ type: 'CNAME', name: 'www', value: hostname }),
     ];
+  }
+
+  function findHostingService(db, serviceId) {
+    return (db.hostingServices || []).find((item) => item.serviceId === serviceId || item.deploymentId === serviceId);
+  }
+
+  function ensureHostingCollections(db) {
+    db.hostingServices ||= [];
+    db.hostingEnv ||= {};
+    db.hostingDisks ||= {};
+    db.hostingDomains ||= {};
+  }
+
+  function syncDeploymentFromHosting(db, service) {
+    const deployment = db.deployments.find((item) => item.deploymentId === service.deploymentId || item.renderServiceId === service.serviceId);
+    if (!deployment) return;
+    Object.assign(deployment, {
+      status: service.status,
+      buildStatus: service.buildStatus,
+      liveUrl: service.liveUrl,
+      environmentConfiguration: service.environmentConfiguration,
+      environmentVariablesMetadata: service.environmentVariablesMetadata,
+      diskMetadata: service.diskMetadata,
+      domainMetadata: service.domainMetadata,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  function syncHostingMetadata(db, serviceId) {
+    const service = findHostingService(db, serviceId);
+    if (!service) return;
+    service.environmentVariablesMetadata = (db.hostingEnv[serviceId] || []).map(({ value, ...rest }) => rest);
+    service.diskMetadata = db.hostingDisks[serviceId] || [];
+    service.domainMetadata = db.hostingDomains[serviceId] || [];
+    service.updatedAt = new Date().toISOString();
+    syncDeploymentFromHosting(db, service);
+  }
+
+  function pickDeploymentStatus(deployment) {
+    return {
+      deploymentId: deployment.deploymentId,
+      deploymentSessionId: deployment.deploymentSessionId,
+      status: deployment.status,
+      buildStatus: deployment.buildStatus,
+      liveUrl: deployment.liveUrl,
+      renderServiceId: deployment.renderServiceId,
+      renderDeployId: deployment.renderDeployId,
+      updatedAt: deployment.updatedAt,
+    };
+  }
+
+  function redact(value) {
+    const text = String(value || '');
+    return text.length <= 4 ? '****' : `${text.slice(0, 2)}******`;
   }
 
   function makeBuilderSite(input = {}) {

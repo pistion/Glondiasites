@@ -13,6 +13,7 @@ import {
   getBuilderSite,
   importBuilderSiteFromGithub,
   parseGithubRepo,
+  createRenderDeployment,
   getRenderSettings, triggerRenderDeploy, activateRenderRepo,
 } from './api';
 import { STOREFRONT_TEMPLATES, StorefrontPreview, StorefrontModal } from './storefront-templates';
@@ -1581,10 +1582,25 @@ function PublishModal({ onClose, content, tpl, siteSlug, navigate, existingSiteI
         await saveBuilderPage(sid, pid, content);
       }
 
-      // 3. Publish locally and trigger Render
+      // 3. Publish locally and start a managed Render deployment session
       const published = await publishBuilderSite(sid);
-      setDeployResult(published?.renderDeploy || null);
-      if (published?.liveUrl) {
+      const deployment = await createRenderDeployment({
+        siteId: sid,
+        projectId: published?.projectId || sid,
+        name: content.siteName || content._repository || tpl?.name || 'Glondia site',
+        slug: published?.slug || siteSlug,
+        serviceType: content._sandboxMode === 'node' ? 'web_service' : 'static_site',
+        repoUrl: content._repository ? `https://github.com/${content._repository}` : null,
+        sourceReference: content._sandboxPreviewUrl || content._source || 'builder',
+        branch: content._branch || 'main',
+        buildCommand: content._renderConfig?.buildCommand || content._sandboxBuildCommand || null,
+        outputDirectory: content._sandboxOutputDirectory || 'dist',
+        environment: 'production',
+      });
+      setDeployResult(deployment || published?.renderDeploy || null);
+      if (deployment?.liveUrl) {
+        setLiveUrl(deployment.liveUrl);
+      } else if (published?.liveUrl) {
         setLiveUrl(published.liveUrl);
       } else if (published?.slug) {
         setLiveUrl(`https://${published.slug}.glondia.app`);
@@ -1692,9 +1708,9 @@ function PublishModal({ onClose, content, tpl, siteSlug, navigate, existingSiteI
             <p className="muted" style={{ maxWidth: 40 + "ch", margin: "10px auto 0" }}>
               The Render deployment has started for the Glondiasites app. Visit the live link below, then attach a custom domain when you are ready.
             </p>
-            {deployResult?.serviceId && (
+            {(deployResult?.serviceId || deployResult?.renderServiceId) && (
               <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-                Render service <span className="mono">{deployResult.serviceId}</span>
+                Render service <span className="mono">{deployResult.serviceId || deployResult.renderServiceId}</span>
               </div>
             )}
             <div style={{ marginTop: 22, padding: 14, background: "var(--bg-deep)", borderRadius: "var(--r-sm)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
