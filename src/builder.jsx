@@ -962,8 +962,8 @@ export function BuilderEditor({ id, siteId: initialSiteId, navigate }) {
             onClick={() => siteId ? window.open(`https://${siteSlug}.glondia.app`, '_blank') : saveDraft()}>
             <ICN.Eye size={14} /> Preview live
           </button>
-          <button className="btn btn-primary" onClick={() => setPublishing(true)}>
-            <ICN.Rocket size={14} /> Publish
+          <button className="btn btn-primary" onClick={() => isGithubImport ? window.dispatchEvent(new CustomEvent('glondia:imported-publish')) : setPublishing(true)}>
+            <ICN.Rocket size={14} /> {isGithubImport ? "Publish to Render" : "Publish"}
           </button>
         </div>
       </div>
@@ -1002,9 +1002,6 @@ function ImportedGithubWorkspace({ content, site }) {
   const sandboxFiles = Array.isArray(content._sandboxFiles) ? content._sandboxFiles : [];
   const files = sandboxFiles.length ? sandboxFiles : githubFiles;
   const contents = content._githubFileContents && typeof content._githubFileContents === 'object' ? content._githubFileContents : {};
-  const firstPath = Object.keys(contents)[0] || files[0]?.path || '';
-  const [selectedPath, setSelectedPath] = useStateB(firstPath);
-  const selectedContent = contents[selectedPath] || '';
   const summary = content._githubSummary || {};
   const loadedPaths = Object.keys(contents);
   const [renderStatus, setRenderStatus] = useStateB({ loading: true, settings: null, services: [], deploys: [], error: null });
@@ -1013,10 +1010,6 @@ function ImportedGithubWorkspace({ content, site }) {
   const [testingDeploy, setTestingDeploy] = useStateB(false);
   const [activatingRender, setActivatingRender] = useStateB(false);
   const [deployMsg, setDeployMsg] = useStateB(null);
-
-  React.useEffect(() => {
-    if (!selectedPath && firstPath) setSelectedPath(firstPath);
-  }, [firstPath, selectedPath]);
 
   const refreshRenderStatus = React.useCallback(() => {
     setRenderStatus((current) => ({ ...current, loading: true, error: null }));
@@ -1043,6 +1036,12 @@ function ImportedGithubWorkspace({ content, site }) {
   React.useEffect(() => {
     refreshRenderStatus();
   }, [refreshRenderStatus]);
+
+  React.useEffect(() => {
+    const publish = () => handleRenderDeploy();
+    window.addEventListener('glondia:imported-publish', publish);
+    return () => window.removeEventListener('glondia:imported-publish', publish);
+  });
 
   const renderActivationPayload = () => {
     const packageJson = contents['package.json'] ? JSON.parse(contents['package.json']) : {};
@@ -1194,52 +1193,13 @@ function ImportedGithubWorkspace({ content, site }) {
         </div>
       </div>
 
-      <div>
-        <div className="label">Repository files</div>
-        {files.length > 0 ? (
-          <select className="select mono" value={selectedPath} onChange={(e) => setSelectedPath(e.target.value)}>
-            {files.map((file) => <option key={file.path} value={file.path}>{file.path}</option>)}
-          </select>
-        ) : (
-          <div className="card" style={{ padding: 14, color: "var(--text-muted)", fontSize: 13 }}>
-            No file tree is stored for this import yet. Re-import the GitHub repository to load its files into this workspace.
-          </div>
-        )}
-      </div>
-
-      <div>
-        <div className="label">File preview</div>
-        <pre className="mono" style={{
-          margin: 0,
-          minHeight: 280,
-          maxHeight: 460,
-          overflow: "auto",
-          whiteSpace: "pre-wrap",
-          wordBreak: "break-word",
-          background: "var(--bg-deep)",
-          border: "1px solid var(--border)",
-          borderRadius: "var(--r-sm)",
-          padding: 14,
-          fontSize: 12,
-          lineHeight: 1.55,
-        }}>{selectedContent || "This file was listed in GitHub, but was not loaded because it is binary, too large, or outside the source preview limit."}</pre>
-      </div>
-
-      <div>
-        <div className="label">Build logs</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {(content._sandboxLogs || []).map((log, index) => (
-            <div key={index} style={{ background: "var(--bg-deep)", border: "1px solid var(--border)", borderRadius: "var(--r-sm)", padding: 10 }}>
-              <div className="row between" style={{ gap: 10 }}>
-                <span className="mono" style={{ fontSize: 12 }}>{log.command || 'sandbox'}</span>
-                <Badge tone={log.ok ? "success" : "danger"} dot={false}>{log.ok ? "OK" : "Check"}</Badge>
-              </div>
-              {log.output && <pre className="mono" style={{ margin: "8px 0 0", whiteSpace: "pre-wrap", color: "var(--text-muted)", fontSize: 11, maxHeight: 120, overflow: "auto" }}>{log.output}</pre>}
-            </div>
-          ))}
-          {!(content._sandboxLogs || []).length && (
-            <div className="card" style={{ padding: 14, color: "var(--text-muted)", fontSize: 13 }}>No sandbox logs yet. Re-import the repository to run clone, install, and build.</div>
-          )}
+      <div style={{ background: "var(--bg-deep)", border: "1px solid var(--border)", borderRadius: "var(--r-sm)", padding: 14 }}>
+        <div className="label">Import summary</div>
+        <div className="kv" style={{ gridTemplateColumns: "120px 1fr" }}>
+          <dt>Files scanned</dt><dd>{files.length || summary.fileCount || 0}</dd>
+          <dt>Text loaded</dt><dd>{summary.loadedFileCount || loadedPaths.length}</dd>
+          <dt>Preview mode</dt><dd>{content._sandboxMode === 'runtime' ? 'Runtime server' : 'Static build'}</dd>
+          <dt>Output</dt><dd className="mono">{content._sandboxOutputDirectory || 'dist'}</dd>
         </div>
       </div>
     </div>
@@ -1257,48 +1217,44 @@ function ImportMetric({ label, value, detail }) {
 }
 
 function ImportedGithubPreview({ content }) {
-  const sandboxPreviewUrl = content._sandboxPreviewUrl || '';
-  const entryHtml = content._githubEntryHtml || '';
-  const hasPreview = sandboxPreviewUrl || entryHtml.trim().length > 0;
   const logs = Array.isArray(content._sandboxLogs) ? content._sandboxLogs : [];
+  const steps = [
+    { label: 'Repository connected', done: !!content._repository },
+    { label: 'Source pulled', done: (content._githubFiles || []).length > 0 },
+    { label: 'Dependencies installed', done: logs.some((log) => String(log.command || '').includes('npm install') && log.ok) },
+    { label: 'Sandbox prepared', done: content._sandboxStatus === 'ready' },
+    { label: 'Ready for Render publish', done: content._sandboxStatus === 'ready' },
+  ];
   return (
     <div className="bld-preview-frame">
-      {hasPreview ? (
-        <iframe
-          title="Imported GitHub preview"
-          sandbox="allow-scripts allow-forms allow-popups allow-same-origin"
-          src={sandboxPreviewUrl || undefined}
-          srcDoc={sandboxPreviewUrl ? undefined : entryHtml}
-          style={{ width: "100%", minHeight: 640, border: 0, background: "#fff" }}
-        />
-      ) : (
-        <div style={{ padding: 42 }}>
-          <div className="eyebrow">Website viewer configuration</div>
-          <h1 style={{ fontFamily: "var(--serif)", fontWeight: 400, fontSize: 42, margin: "10px 0 14px" }}>{content._repository}</h1>
-          <p style={{ color: "var(--text-muted)", maxWidth: 620, lineHeight: 1.6 }}>
-            The source has been imported. The viewer is waiting for a successful sandbox build or Render deploy before it can display the live website.
+      <div style={{ minHeight: 640, padding: 44, display: "flex", alignItems: "center", justifyContent: "center", background: "radial-gradient(circle at 50% 15%, rgba(74,222,128,.16), transparent 38%), var(--bg-deep)" }}>
+        <div style={{ width: "min(680px, 100%)", textAlign: "center" }}>
+          <div style={{ width: 108, height: 108, borderRadius: 999, margin: "0 auto 24px", border: "1px solid rgba(74,222,128,.35)", display: "grid", placeItems: "center", boxShadow: "0 0 54px rgba(74,222,128,.22)", animation: "pulse 1.8s ease-in-out infinite" }}>
+            <ICN.Rocket size={42} style={{ color: "var(--accent)" }} />
+          </div>
+          <div className="eyebrow">Deployment pipeline</div>
+          <h1 style={{ fontFamily: "var(--serif)", fontWeight: 400, fontSize: 44, margin: "10px 0 14px" }}>{content._repository || 'Imported site'}</h1>
+          <p style={{ color: "var(--text-muted)", maxWidth: 620, lineHeight: 1.6, margin: "0 auto 28px" }}>
+            Glondia pulled the repository and prepared a sandbox. Use Publish to create or reuse a dedicated customer Render service and push this app live without touching the Glondiasites platform.
           </p>
-          <div className="card" style={{ marginTop: 22, padding: 16 }}>
-            <div className="kv" style={{ gridTemplateColumns: "130px 1fr" }}>
-              <dt>Branch</dt><dd className="mono">{content._branch || 'main'}</dd>
-              <dt>Status</dt><dd className="mono">{content._sandboxStatus || 'not started'}</dd>
-              <dt>Mode</dt><dd className="mono">{content._sandboxMode || 'static'}</dd>
-              <dt>Output</dt><dd className="mono">{content._sandboxOutputDirectory || 'dist'}</dd>
-              <dt>Error</dt><dd>{content._sandboxError || 'None'}</dd>
-            </div>
-          </div>
-          <div className="term" style={{ marginTop: 18, textAlign: "left", maxHeight: 260 }}>
-            {logs.length ? logs.map((log, index) => (
-              <div key={index}>
-                <span className="ts">{log.ok ? 'ok' : 'check'}</span> <span className={log.ok ? "ok" : "warn"}>{log.command || 'sandbox'}</span>
-                {log.output && <pre className="mono" style={{ whiteSpace: "pre-wrap", margin: "6px 0 12px", color: "var(--text-muted)" }}>{log.output}</pre>}
+          <div style={{ display: "grid", gap: 10, textAlign: "left" }}>
+            {steps.map((step, index) => (
+              <div key={step.label} style={{ display: "grid", gridTemplateColumns: "32px 1fr auto", alignItems: "center", gap: 12, padding: "12px 14px", border: "1px solid var(--border)", borderRadius: "var(--r-sm)", background: "rgba(255,255,255,.03)" }}>
+                <div style={{ width: 24, height: 24, borderRadius: 999, display: "grid", placeItems: "center", background: step.done ? "var(--accent-soft)" : "var(--bg)", color: step.done ? "var(--accent)" : "var(--text-muted)" }}>
+                  {step.done ? <ICN.CheckCircle size={14} /> : <span className="mono" style={{ fontSize: 11 }}>{index + 1}</span>}
+                </div>
+                <div style={{ fontWeight: 650 }}>{step.label}</div>
+                <Badge tone={step.done ? "success" : "muted"} dot={false}>{step.done ? "Done" : "Waiting"}</Badge>
               </div>
-            )) : (
-              <div><span className="ts">idle</span> <span className="info">Re-import the repository to run clone, install, and build.</span></div>
-            )}
+            ))}
           </div>
+          {content._sandboxError && (
+            <div style={{ marginTop: 18, color: "var(--danger)", fontSize: 13 }}>
+              {content._sandboxError}
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
