@@ -1,10 +1,10 @@
-export const APP_MODE = normalizeAppMode(import.meta.env.VITE_APP_MODE);
-
 export const APP_MODES = {
   demo: 'demo',
   live: 'live',
   disabled: 'disabled',
 };
+
+export const APP_MODE = normalizeAppMode(import.meta.env.VITE_APP_MODE);
 
 export function isLiveMode() {
   return APP_MODE === APP_MODES.live;
