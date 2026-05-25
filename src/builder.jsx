@@ -585,7 +585,10 @@ export function BuilderImport({ navigate }) {
                   value={repoUrl} onChange={(e) => updateRepoUrl(e.target.value)}
                   onPaste={(e) => {
                     const pasted = e.clipboardData?.getData('text');
-                    if (pasted) updateRepoUrl(pasted);
+                    if (pasted) {
+                      e.preventDefault();
+                      updateRepoUrl(pasted);
+                    }
                   }}
                   onKeyDown={(e) => e.key === 'Enter' && handleGitConnect()} />
                 <button className="btn btn-primary" onClick={handleGitConnect} disabled={gitBusy || importPhase === 'complete' || !detectedRepo}>

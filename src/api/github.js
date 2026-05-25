@@ -19,10 +19,10 @@ export async function listGitHubBranches(owner, repo) {
 }
 
 export function parseGithubRepo(value) {
-  const raw = String(value || '').trim();
+  const raw = extractGithubRepoInput(value);
   if (!raw) return null;
 
-  const ssh = raw.match(/^git@github\.com:([^/]+)\/(.+?)(?:\.git)?$/i);
+  const ssh = raw.match(/^git@github\.com:([^/]+)\/(.+)$/i);
   if (ssh) return normalizeGithubRepo(ssh[1], ssh[2]);
 
   const shorthand = raw.match(/^([^/\s]+)\/([^/\s]+)$/);
@@ -88,8 +88,12 @@ export async function fetchGithubSnapshot(repo, branch) {
   const contents = {};
   await Promise.all(preferred.map(async (file) => {
     const rawUrl = `https://raw.githubusercontent.com/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/${encodeURIComponent(branch)}/${file.path.split('/').map(encodeURIComponent).join('/')}`;
-    const response = await fetch(rawUrl);
-    if (response.ok) contents[file.path] = await response.text();
+    try {
+      const response = await fetch(rawUrl);
+      if (response.ok) contents[file.path] = await response.text();
+    } catch {
+      // Keep the import moving when an individual raw file request is slow or blocked.
+    }
   }));
 
   const entryHtml = contents['index.html'] || contents['public/index.html'] || '';
@@ -108,15 +112,30 @@ export async function fetchGithubSnapshot(repo, branch) {
 }
 
 function normalizeGithubRepo(owner, repo) {
-  const cleanOwner = String(owner || '').trim();
-  const cleanRepo = String(repo || '').trim().replace(/\.git$/i, '');
-  if (!cleanOwner || !cleanRepo) return null;
+  const cleanOwner = String(owner || '').trim().replace(/^@/, '');
+  const cleanRepo = String(repo || '')
+    .trim()
+    .replace(/[?#].*$/, '')
+    .replace(/https?:.*$/i, '')
+    .replace(/\.git.*$/i, '')
+    .replace(/[/\\].*$/, '');
+  if (!/^[A-Za-z0-9-]+$/.test(cleanOwner) || !/^[A-Za-z0-9._-]+$/.test(cleanRepo)) return null;
   return {
     owner: cleanOwner,
     repo: cleanRepo,
     fullName: `${cleanOwner}/${cleanRepo}`,
     url: `https://github.com/${cleanOwner}/${cleanRepo}`,
   };
+}
+
+function extractGithubRepoInput(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const urlMatch = raw.match(/https?:\/\/github\.com\/[^\s]+/i);
+  if (urlMatch) return urlMatch[0];
+  const sshMatch = raw.match(/git@github\.com:[^\s]+/i);
+  if (sshMatch) return sshMatch[0];
+  return raw.split(/\s+/)[0];
 }
 
 function emptyGithubSnapshot(message) {

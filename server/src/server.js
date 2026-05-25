@@ -374,9 +374,9 @@ function providerApiGuard(req, res, next) {
 }
 
 function parseGithubRepo(value) {
-  const raw = String(value || '').trim();
+  const raw = extractGithubRepoInput(value);
   if (!raw) return null;
-  const ssh = raw.match(/^git@github\.com:([^/]+)\/(.+?)(?:\.git)?$/i);
+  const ssh = raw.match(/^git@github\.com:([^/]+)\/(.+)$/i);
   if (ssh) return normalizeGithubRepo(ssh[1], ssh[2]);
   const shorthand = raw.match(/^([^/\s]+)\/([^/\s]+)$/);
   if (shorthand && !raw.includes('://')) return normalizeGithubRepo(shorthand[1], shorthand[2]);
@@ -392,15 +392,30 @@ function parseGithubRepo(value) {
 }
 
 function normalizeGithubRepo(owner, repo) {
-  const cleanOwner = String(owner || '').trim();
-  const cleanRepo = String(repo || '').trim().replace(/\.git$/i, '');
-  if (!cleanOwner || !cleanRepo) return null;
+  const cleanOwner = String(owner || '').trim().replace(/^@/, '');
+  const cleanRepo = String(repo || '')
+    .trim()
+    .replace(/[?#].*$/, '')
+    .replace(/https?:.*$/i, '')
+    .replace(/\.git.*$/i, '')
+    .replace(/[/\\].*$/, '');
+  if (!/^[A-Za-z0-9-]+$/.test(cleanOwner) || !/^[A-Za-z0-9._-]+$/.test(cleanRepo)) return null;
   return {
     owner: cleanOwner,
     repo: cleanRepo,
     fullName: `${cleanOwner}/${cleanRepo}`,
-    url: `https://github.com/${cleanOwner}/${cleanRepo}.git`,
+    url: `https://github.com/${cleanOwner}/${cleanRepo}`,
   };
+}
+
+function extractGithubRepoInput(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const urlMatch = raw.match(/https?:\/\/github\.com\/[^\s]+/i);
+  if (urlMatch) return urlMatch[0];
+  const sshMatch = raw.match(/git@github\.com:[^\s]+/i);
+  if (sshMatch) return sshMatch[0];
+  return raw.split(/\s+/)[0];
 }
 
 function assertRepoAllowed(repo) {
