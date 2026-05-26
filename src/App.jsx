@@ -176,7 +176,7 @@ export default function App() {
       case "billing":           return <BillingPageIntegrated />;
       case "settings":          return <SimplePage title="Settings" body="Workspace settings — coming up next." />;
       case "vps-hosting":       return <VpsHostingList navigate={navigate} />;
-      case "vps-create":        return <VpsCreateWizard navigate={navigate} />;
+      case "vps-create":        return <VpsCreateWizard navigate={navigate} initialPlan={route.params?.plan || ''} initialPlanType={route.params?.planType || ''} />;
       case "vps-detail":        return <VpsDetail id={route.params?.id} navigate={navigate} />;
       default:                  return <Marketing navigate={navigate} />;
     }

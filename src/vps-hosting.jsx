@@ -181,8 +181,9 @@ export function VpsHostingList({ navigate }) {
         value={tab}
         onChange={setTab}
         options={[
-          { value: 'servers',  label: 'Servers' },
-          { value: 'settings', label: 'Settings & integrations' },
+          { value: 'servers',  label: 'My servers' },
+          { value: 'plans',    label: 'Plans & pricing' },
+          { value: 'settings', label: 'Settings' },
         ]}
       />
 
@@ -248,6 +249,8 @@ export function VpsHostingList({ navigate }) {
             </div>
           )}
         </>
+      ) : tab === 'plans' ? (
+        <VpsPlans navigate={navigate} />
       ) : (
         <VpsSettings />
       )}
@@ -257,8 +260,8 @@ export function VpsHostingList({ navigate }) {
 
 // ─── VPS Create Wizard ────────────────────────────────────────────────────────
 
-export function VpsCreateWizard({ navigate }) {
-  const [step, setStep]         = useState(0);
+export function VpsCreateWizard({ navigate, initialPlan = '', initialPlanType = '' }) {
+  const [step, setStep]         = useState(initialPlanType ? 1 : 0);
   const [regions, setRegions]   = useState([]);
   const [plans, setPlans]       = useState([]);
   const [osList, setOsList]     = useState([]);
@@ -271,8 +274,8 @@ export function VpsCreateWizard({ navigate }) {
   const pollRef = useRef(null);
 
   const [form, setForm] = useState({
-    planType: '',
-    region: '', plan: '', osId: null,
+    planType: initialPlanType || '',
+    region: '', plan: initialPlan || '', osId: null,
     label: '', hostname: '',
     // SSH
     sshMode: 'none',   // 'none' | 'paste' | 'existing'
@@ -1225,6 +1228,181 @@ function VpsSettings() {
         </div>
       ) : null}
 
+    </div>
+  );
+}
+
+// ─── VPS Plans & pricing (service catalog) ────────────────────────────────────
+
+function VpsPlans({ navigate }) {
+  const [plans, setPlans]           = useState([]);
+  const [settings, setSettings]     = useState(null);
+  const [loading, setLoading]       = useState(true);
+  const [error, setError]           = useState('');
+  const [typeFilter, setTypeFilter] = useState('vc2');
+
+  useEffect(() => {
+    let alive = true;
+    Promise.all([listVultrPlans(), getVultrSettings()])
+      .then(([p, s]) => {
+        if (!alive) return;
+        setPlans(p ?? []);
+        setSettings(s);
+      })
+      .catch((err) => { if (alive) setError(err.message); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, []);
+
+  if (loading) return (
+    <div className="card" style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
+      Loading instance catalog…
+    </div>
+  );
+
+  const markup   = settings?.markupPercent ?? 30;
+  const filtered = plans.filter((p) => p.type === typeFilter);
+  const typeMeta = PLAN_TYPES.find((t) => t.id === typeFilter);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+      {error && (
+        <div className="card" style={{ padding: '10px 16px', color: 'var(--danger)', fontSize: 13 }}>{error}</div>
+      )}
+
+      {!settings?.vultrConfigured && !error && (
+        <div className="card" style={{
+          padding: '14px 18px', fontSize: 13,
+          borderLeft: '3px solid var(--accent)', background: 'var(--accent-soft)',
+        }}>
+          <span style={{ fontWeight: 600 }}>Live catalog not available —</span>
+          {' '}add <code className="mono">VULTR_API_KEY</code> to your backend environment to load real instance types and pricing.
+        </div>
+      )}
+
+      {/* ── Plan type selector ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 12 }}>
+        {PLAN_TYPES.map((pt) => {
+          const Icon  = ICN[pt.icon];
+          const sel   = typeFilter === pt.id;
+          const count = plans.filter((p) => p.type === pt.id).length;
+          return (
+            <SelectCard key={pt.id} selected={sel} onClick={() => setTypeFilter(pt.id)}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                <span style={{
+                  width: 38, height: 38, borderRadius: 9, flexShrink: 0,
+                  background: sel ? 'var(--accent)' : 'var(--bg-deep)',
+                  color: sel ? '#fff' : 'var(--text-muted)',
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <Icon size={17} />
+                </span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                    <span style={{ fontWeight: 700, fontSize: 13 }}>{pt.name}</span>
+                    {pt.badge && (
+                      <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 99,
+                        background: 'var(--accent)', color: '#fff' }}>{pt.badge}</span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.4, marginBottom: 4 }}>
+                    {pt.tagline}
+                  </div>
+                  {count > 0 && (
+                    <div style={{ fontSize: 11, color: sel ? 'var(--accent)' : 'var(--text-faint)', fontWeight: 600 }}>
+                      {count} sizes available
+                    </div>
+                  )}
+                </div>
+              </div>
+            </SelectCard>
+          );
+        })}
+      </div>
+
+      {/* ── Instance table ── */}
+      <div className="card card-flush">
+        <div className="card-head">
+          <div>
+            <h2 style={{ margin: 0 }}>{typeMeta?.name ?? typeFilter}</h2>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>{typeMeta?.tagline}</div>
+          </div>
+          {filtered.length > 0 && (
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              {filtered.length} configurations · {markup}% platform fee included
+            </span>
+          )}
+        </div>
+
+        {filtered.length === 0 ? (
+          <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+            {settings?.vultrConfigured
+              ? 'No configurations for this plan type.'
+              : 'Configure VULTR_API_KEY on your backend to load the live instance catalog.'}
+          </div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>Instance</th>
+                  <th style={{ textAlign: 'center' }}>vCPU</th>
+                  <th style={{ textAlign: 'center' }}>RAM</th>
+                  <th style={{ textAlign: 'center' }}>SSD</th>
+                  <th style={{ textAlign: 'center' }}>Transfer</th>
+                  <th style={{ textAlign: 'right' }}>Monthly</th>
+                  <th style={{ textAlign: 'right' }}>Hourly</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((p) => {
+                  const base   = p.monthly_cost ?? 0;
+                  const price  = base * (1 + markup / 100);
+                  const hourly = price / 730;
+                  return (
+                    <tr key={p.id}>
+                      <td>
+                        <div style={{ fontWeight: 600, fontSize: 13 }}>
+                          {p.vcpu_count} {p.vcpu_count === 1 ? 'vCPU' : 'vCPUs'} · {p.ram >= 1024 ? p.ram / 1024 + ' GB' : p.ram + ' MB'} RAM
+                        </div>
+                        <div className="mono" style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 2 }}>
+                          {p.id}
+                        </div>
+                      </td>
+                      <td style={{ textAlign: 'center', fontWeight: 600 }}>{p.vcpu_count}</td>
+                      <td style={{ textAlign: 'center' }}>
+                        {p.ram >= 1024 ? `${p.ram / 1024} GB` : `${p.ram} MB`}
+                      </td>
+                      <td style={{ textAlign: 'center' }}>{p.disk} GB</td>
+                      <td style={{ textAlign: 'center' }}>
+                        {p.bandwidth ? `${p.bandwidth} GB` : '—'}
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        <div style={{ fontWeight: 800, fontSize: 15 }}>${price.toFixed(2)}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>/month</div>
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        <div className="mono" style={{ fontSize: 12, color: 'var(--text-muted)' }}>${hourly.toFixed(4)}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>/hour</div>
+                      </td>
+                      <td style={{ textAlign: 'right', paddingRight: 16 }}>
+                        <button
+                          className="btn btn-primary btn-sm"
+                          onClick={() => navigate({ view: 'vps-create', params: { plan: p.id, planType: p.type } })}
+                        >
+                          Deploy →
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
