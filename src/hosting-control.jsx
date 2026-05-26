@@ -4,6 +4,7 @@ import { Badge, Empty, StatusBadge, Tabs } from './components';
 import {
   addHostingDomain,
   attachHostingDisk,
+  deleteHostingDisk,
   captureHostingPayPalOrder,
   createHostingPayPalOrder,
   deleteHostingDeployment,
@@ -340,6 +341,7 @@ function EnvironmentTab({ deploymentId, onChanged }) {
   const [form, setForm] = useState({ key: '', value: '', secret: true, environment: 'production' });
   const [editing, setEditing] = useState('');
   const [error, setError] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
   const load = () => listHostingEnvVars(deploymentId).then((items) => setRows(items || []));
   useEffect(() => { load().catch(() => setRows([])); }, [deploymentId]);
@@ -347,6 +349,7 @@ function EnvironmentTab({ deploymentId, onChanged }) {
   const submit = async (event) => {
     event.preventDefault();
     setError('');
+    setIsSaving(true);
     try {
       if (editing) await updateHostingEnvVar(deploymentId, editing, form);
       else await upsertHostingEnvVar(deploymentId, form);
@@ -356,6 +359,8 @@ function EnvironmentTab({ deploymentId, onChanged }) {
       onChanged?.();
     } catch (err) {
       setError(err.message);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -372,7 +377,7 @@ function EnvironmentTab({ deploymentId, onChanged }) {
         {error && <div style={{ color: 'var(--danger)', fontSize: 13, marginTop: 10 }}>{error}</div>}
         <div className="row" style={{ justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
           <button type="button" className="btn btn-outline" onClick={() => syncHostingEnvVars(deploymentId).then(load).then(onChanged)}><ICN.Refresh size={14} /> Sync to Render</button>
-          <button className="btn btn-primary">{editing ? 'Save variable' : 'Add variable'}</button>
+          <button className="btn btn-primary" disabled={isSaving}>{isSaving ? '···' : (editing ? 'Save variable' : 'Add variable')}</button>
         </div>
       </form>
       <div className="card card-flush">
@@ -394,23 +399,52 @@ function EnvironmentTab({ deploymentId, onChanged }) {
 }
 
 function DiskTab({ deploymentId, app, onChanged }) {
-  const [form, setForm] = useState({ name: 'data', mountPath: '/var/data', sizeGB: 1, region: app.environmentConfiguration?.region || 'oregon' });
+  const [form, setForm] = useState({ name: 'data', mountPath: '/var/data', sizeGB: 1 });
+  const [isAttaching, setIsAttaching] = useState(false);
+  const [error, setError] = useState('');
   const disks = app.diskMetadata || [];
   const supported = app.serviceType === 'web_service';
+
+  const attachDisk = async (event) => {
+    event.preventDefault();
+    setError('');
+    setIsAttaching(true);
+    try {
+      await attachHostingDisk(deploymentId, form);
+      onChanged?.();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsAttaching(false);
+    }
+  };
+
   return (
     <div className="grid-side">
-      <form className="card" onSubmit={(event) => { event.preventDefault(); attachHostingDisk(deploymentId, form).then(onChanged); }}>
+      <form className="card" onSubmit={attachDisk}>
         <h2 style={{ marginTop: 0 }}>SSD / persistent disk</h2>
         {!supported && <div className="muted" style={{ color: 'var(--warning)', marginBottom: 12 }}>Persistent disks are not supported for this Render service type.</div>}
         <div className="grid-2">
           <div><label className="label">Disk name</label><input className="input mono" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
-          <div><label className="label">Disk size</label><input className="input mono" type="number" min="1" max="1024" value={form.sizeGB} onChange={(e) => setForm({ ...form, sizeGB: Number(e.target.value) })} /></div>
+          <div><label className="label">Disk size (GB)</label><input className="input mono" type="number" min="1" max="1024" value={form.sizeGB} onChange={(e) => setForm({ ...form, sizeGB: Number(e.target.value) })} /></div>
           <div><label className="label">Mount path</label><input className="input mono" value={form.mountPath} onChange={(e) => setForm({ ...form, mountPath: e.target.value })} /></div>
-          <div><label className="label">Region</label><input className="input mono" value={form.region} onChange={(e) => setForm({ ...form, region: e.target.value })} /></div>
         </div>
-        <div className="row" style={{ justifyContent: 'flex-end', marginTop: 14 }}><button className="btn btn-primary" disabled={!supported}>Attach disk</button></div>
+        {error && <div style={{ color: 'var(--danger)', fontSize: 13, marginTop: 10 }}>{error}</div>}
+        <div className="row" style={{ justifyContent: 'flex-end', marginTop: 14 }}><button className="btn btn-primary" disabled={!supported || isAttaching}>{isAttaching ? '···' : 'Attach disk'}</button></div>
       </form>
-      <MetadataTable rows={disks} empty="No persistent disk configured." />
+      <div className="card card-flush">
+        <div className="card-head"><h2>Configured disks</h2><span className="meta">{disks.length} items</span></div>
+        <table className="tbl"><thead><tr><th>Name</th><th>Mount</th><th>Size</th><th>Status</th><th></th></tr></thead><tbody>
+          {disks.length === 0 ? <tr><td colSpan={5}>No persistent disk configured.</td></tr> : disks.map((row) => (
+            <tr key={row.diskId || row.name}>
+              <td className="mono">{row.name}</td><td className="mono">{row.mountPath}</td><td>{row.sizeGB} GB</td><td>{row.status}</td>
+              <td style={{ textAlign: 'right' }}>
+                <button className="btn btn-sm btn-ghost" style={{ color: 'var(--danger)' }} onClick={() => deleteHostingDisk(deploymentId, row.diskId).then(onChanged)}><ICN.Trash size={13} /></button>
+              </td>
+            </tr>
+          ))}
+        </tbody></table>
+      </div>
     </div>
   );
 }

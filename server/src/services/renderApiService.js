@@ -189,6 +189,7 @@ class RenderApiService {
               buildCommand: input.buildCommand || 'npm install && npm run build',
               startCommand: input.startCommand || 'npm start',
             },
+            ...(input.disk ? { disk: { name: input.disk.name, mountPath: input.disk.mountPath, sizeGB: Number(input.disk.sizeGB || 1) } } : {}),
           };
     return {
       type: serviceType,

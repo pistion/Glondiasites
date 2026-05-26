@@ -33,10 +33,18 @@ class EnvironmentService {
   async upsert(deploymentId, input = {}) {
     const deployment = await resolveDeployment(deploymentId);
     const envVar = validateEnvVar(input);
+    let renderSynced = false;
+    if (renderApiService.configured() && deployment.renderServiceId) {
+      try {
+        await renderApiService.upsertEnvVars(deployment.renderServiceId, [{ key: envVar.key, value: envVar.value }]);
+        renderSynced = true;
+      } catch { /* store locally even if Render sync fails */ }
+    }
     return mutateHostingStore((store) => {
       const rows = store.env[deployment.deploymentId] || [];
       const existing = rows.find((item) => item.key === envVar.key);
       const metadata = toMetadata(envVar, null);
+      if (renderSynced) metadata.renderSynced = true;
       if (existing) Object.assign(existing, metadata);
       else rows.unshift(metadata);
       store.env[deployment.deploymentId] = rows;
@@ -51,7 +59,11 @@ class EnvironmentService {
 
   async remove(deploymentId, key) {
     const deployment = await resolveDeployment(deploymentId);
-    await renderApiService.deleteEnvVar(deployment.renderServiceId, key);
+    if (renderApiService.configured() && deployment.renderServiceId) {
+      try {
+        await renderApiService.deleteEnvVar(deployment.renderServiceId, key);
+      } catch { /* remove locally even if Render delete fails */ }
+    }
     return mutateHostingStore((store) => {
       store.env[deployment.deploymentId] = (store.env[deployment.deploymentId] || []).filter((item) => item.key !== key);
       updateDeploymentEnv(store, deployment.deploymentId, store.env[deployment.deploymentId]);
