@@ -158,19 +158,27 @@ class RenderApiService {
 
   buildServicePayload(input = {}) {
     const serviceType = input.serviceType || inferServiceType(input);
+    const runtime = input.runtime || input.env || 'node';
     const details = serviceType === 'static_site'
       ? {
           buildCommand: input.buildCommand || 'npm run build',
           publishPath: input.outputDirectory || 'dist',
           pullRequestPreviewsEnabled: 'no',
         }
-      : {
-          env: input.runtime || 'node',
-          buildCommand: input.buildCommand || 'npm ci && npm run build',
-          startCommand: input.startCommand || 'npm start',
-          plan: input.plan || 'starter',
-          region: input.region || 'oregon',
-        };
+      : serviceType === 'docker'
+        ? {
+            plan: input.plan || 'starter',
+            region: input.region || 'oregon',
+          }
+        : {
+            env: runtime,
+            plan: input.plan || 'starter',
+            region: input.region || 'oregon',
+            envSpecificDetails: {
+              buildCommand: input.buildCommand || 'npm install && npm run build',
+              startCommand: input.startCommand || 'npm start',
+            },
+          };
     return {
       type: serviceType,
       name: renderSafeName(input.serviceName || input.name || input.slug || 'glondia-site'),

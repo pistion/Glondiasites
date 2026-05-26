@@ -783,10 +783,11 @@ async function activateRenderRepoService(input = {}) {
           publishPath: input.outputDirectory || 'dist',
         }
       : {
-          plan: input.plan || 'free',
-          env: 'node',
+          plan: input.plan || 'starter',
+          region: input.region || 'oregon',
+          env: input.runtime || input.env || 'node',
           envSpecificDetails: {
-            buildCommand: input.buildCommand || 'npm install',
+            buildCommand: input.buildCommand || 'npm install && npm run build',
             startCommand: input.startCommand || 'npm start',
           },
         },

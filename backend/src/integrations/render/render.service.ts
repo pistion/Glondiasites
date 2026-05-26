@@ -11,7 +11,7 @@ export interface RenderDeploy {
 }
 
 export interface RenderCreateServicePayload {
-  type: 'static_site' | 'web_service';
+  type: 'static_site' | 'web_service' | 'docker';
   name: string;
   repo: string;
   branch?: string;
@@ -19,6 +19,9 @@ export interface RenderCreateServicePayload {
   buildCommand?: string;
   startCommand?: string;
   outputDirectory?: string;
+  runtime?: string;
+  plan?: string;
+  region?: string;
   envVars?: Array<{ key: string; value: string }>;
 }
 
@@ -124,12 +127,20 @@ export class RenderService {
           publishPath: input.outputDirectory || 'dist',
           pullRequestPreviewsEnabled: 'no'
         }
-      : {
-          env: 'node',
-          buildCommand: input.buildCommand || 'npm ci && npm run build',
-          startCommand: input.startCommand || 'npm start',
-          plan: 'starter'
-        };
+      : input.type === 'docker'
+        ? {
+            plan: input.plan || 'starter',
+            region: input.region || 'oregon'
+          }
+        : {
+            env: input.runtime || 'node',
+            plan: input.plan || 'starter',
+            region: input.region || 'oregon',
+            envSpecificDetails: {
+              buildCommand: input.buildCommand || 'npm install && npm run build',
+              startCommand: input.startCommand || 'npm start'
+            }
+          };
     return {
       type: input.type,
       name: input.name.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60),
