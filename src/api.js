@@ -236,6 +236,30 @@ export const deleteHostingApp = deleteHostingDeployment;
 
 export const redeployHostingApp = redeployRenderDeployment;
 
+export async function getPayPalClientSettings() {
+  return hostingRequest('/payments/paypal-client');
+}
+
+export async function createDomainPayPalOrder(input) {
+  return hostingRequest('/payments/domain/create-order', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export async function captureDomainPayPalOrder(input) {
+  const result = await hostingRequest('/payments/domain/capture', { method: 'POST', body: JSON.stringify(input) });
+  notifyDataChanged();
+  return result;
+}
+
+export async function createHostingPayPalOrder(input) {
+  return hostingRequest('/payments/hosting/create-order', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export async function captureHostingPayPalOrder(input) {
+  const result = await hostingRequest('/payments/hosting/capture', { method: 'POST', body: JSON.stringify(input) });
+  notifyDataChanged();
+  return result;
+}
+
 export async function listHostingEnvVars(deploymentId) {
   return hostingRequest(`/hosting/${deploymentId}/env`);
 }

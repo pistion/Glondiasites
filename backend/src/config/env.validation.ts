@@ -40,6 +40,10 @@ const envSchema = z.object({
   PAYPAL_CLIENT_SECRET: z.string().default(''),
   PAYPAL_WEBHOOK_ID: z.string().default(''),
   PAYPAL_SANDBOX: z.string().default('true'),
+  PLATFORM_MARKUP_PERCENT: z.coerce.number().min(0).default(30),
+  PLATFORM_PAYPAL_EMAIL: z.string().default(''),
+  DOMAIN_REGISTRAR_COST_ACCOUNT: z.string().default(''),
+  HOSTING_COST_ACCOUNT: z.string().default(''),
 
   // GitHub OAuth integration
   GITHUB_CLIENT_ID: z.string().default(''),

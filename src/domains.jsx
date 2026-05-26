@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useState as useStateD } from 'react';
 import { ICN } from './icons';
 import { GD } from './data';
 import { StatusBadge, Tabs, Stat, Badge, Empty, ToggleRow } from './components';
-import { bulkDeleteDnsRecords, checkDomainAvailability, createDnsRecord, createDomain, createRegistrarContact, deleteDnsRecord, exportZoneFile, getRegistrarOperation, getStoredAuth, importZoneFile, pullDnsFromSpaceship, pushDnsToSpaceship, registerDomain, ttlToSeconds, updateDnsRecord, updateNameservers, verifyDomain } from './api';
+import { bulkDeleteDnsRecords, captureDomainPayPalOrder, checkDomainAvailability, createDnsRecord, createDomain, createDomainPayPalOrder, deleteDnsRecord, exportZoneFile, getPayPalClientSettings, getRegistrarOperation, importZoneFile, pullDnsFromSpaceship, pushDnsToSpaceship, ttlToSeconds, updateDnsRecord, updateNameservers, verifyDomain } from './api';
 import { useDnsRecords, useDomains } from './use-domains';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -320,7 +320,16 @@ export function DomainsBuy({ navigate }) {
     setRegisterError(null);
 
     try {
-      let contactId = null;
+      const order = await createDomainPayPalOrder({
+        domains: cart.map((item) => ({ name: item.name, years: 1 })),
+        contact,
+        autoRenew: true,
+        privacyProtection: true,
+      });
+      if (!order.approvalUrl) throw new Error('PayPal did not return an approval link.');
+      window.open(order.approvalUrl, '_blank', 'noopener,noreferrer');
+      setRegisterError('Approve the PayPal order in the new tab, then use PayPal checkout here to finish registration.');
+      return;
 
       if (getStoredAuth().accessToken) {
         // 1. Create a registrant contact in Spaceship with the form data
@@ -360,6 +369,11 @@ export function DomainsBuy({ navigate }) {
     } finally {
       setRegistering(false);
     }
+  };
+
+  const finishPaidOrder = (result) => {
+    setOperations(result.operations || []);
+    setStep("done");
   };
 
   return (
@@ -411,6 +425,7 @@ export function DomainsBuy({ navigate }) {
           setContact={setContact}
           onBack={() => setStep("results")}
           onComplete={completeOrder}
+          onPaid={finishPaidOrder}
           busy={registering}
           error={registerError}
         />
@@ -712,8 +727,10 @@ const COUNTRIES = [
   { code: 'ZA', label: 'South Africa' },
 ];
 
-function Checkout({ cart, subtotal, contact, setContact, onBack, onComplete, busy, error }) {
-  const [pay, setPay] = useStateD("card");
+function Checkout({ cart, subtotal, contact, setContact, onBack, onComplete, onPaid, busy, error }) {
+  const [pay, setPay] = useStateD("paypal");
+  const [quote, setQuote] = useStateD(null);
+  const [paypalError, setPaypalError] = useStateD('');
   const set = (field) => (e) => setContact(prev => ({ ...prev, [field]: e.target.value }));
 
   // Basic required-field validation before submit
@@ -721,6 +738,8 @@ function Checkout({ cart, subtotal, contact, setContact, onBack, onComplete, bus
   const missing = required.filter(f => !contact[f].trim());
   const phoneOk = /^\+\d{1,3}\.\d{4,14}$/.test(contact.phone.trim());
   const canSubmit = cart.length > 0 && missing.length === 0 && phoneOk;
+  const estimatedMarkup = quote?.amounts?.markupAmount ?? (subtotal * 0.3).toFixed(2);
+  const estimatedTotal = quote?.amounts?.totalAmount ?? (subtotal * 1.3).toFixed(2);
 
   return (
     <div className="grid-side" style={{ alignItems: "flex-start" }}>
@@ -797,20 +816,30 @@ function Checkout({ cart, subtotal, contact, setContact, onBack, onComplete, bus
         <div className="card">
           <h2 style={{ marginTop: 0, marginBottom: 16 }}>2. Payment</h2>
           <div className="row" style={{ gap: 10, marginBottom: 18 }}>
-            <PayPill icon="CreditCard" label="Card" active={pay === "card"} onClick={() => setPay("card")} />
+            <PayPill icon="CreditCard" label="PayPal" active={pay === "paypal"} onClick={() => setPay("paypal")} />
             <PayPill icon="Cube" label="Bank transfer" active={pay === "bank"} onClick={() => setPay("bank")} />
           </div>
-          {pay === "card" && (
-            <div className="grid-2">
-              <div style={{ gridColumn: "1 / -1" }}><label className="label">Card number</label><input className="input mono" placeholder="1234 5678 9012 3456" /></div>
-              <div><label className="label">Expiry</label><input className="input mono" placeholder="MM / YY" /></div>
-              <div><label className="label">CVC</label><input className="input mono" placeholder="123" /></div>
-              <div style={{ gridColumn: "1 / -1" }}><label className="label">Name on card</label><input className="input" placeholder="Name on card" /></div>
-            </div>
+          {pay === "paypal" && (
+            <PayPalCheckoutButton
+              disabled={!canSubmit || busy}
+              createOrder={() => createDomainPayPalOrder({
+                domains: cart.map((item) => ({ name: item.name, years: 1 })),
+                contact,
+                autoRenew: true,
+                privacyProtection: true,
+              }).then((order) => {
+                setQuote(order);
+                return order;
+              })}
+              captureOrder={captureDomainPayPalOrder}
+              onPaid={onPaid}
+              onError={(message) => setPaypalError(message)}
+            />
           )}
           {pay === "bank" && (
             <p className="muted">We'll email payment instructions for bank transfer in USD or PGK. Domain registration begins once the transfer clears.</p>
           )}
+          {paypalError && <p style={{ color: 'var(--danger)', fontSize: 13 }}>{paypalError}</p>}
         </div>
 
         <div className="card">
@@ -843,13 +872,13 @@ function Checkout({ cart, subtotal, contact, setContact, onBack, onComplete, bus
                 </div>
               ))}
               <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14 }}>
-                <div className="row between"><span className="muted">Subtotal</span><span>${subtotal.toFixed(2)}</span></div>
+                <div className="row between"><span className="muted">Domain price</span><span>${subtotal.toFixed(2)}</span></div>
                 <div className="row between"><span className="muted">WHOIS privacy</span><span style={{ color: "var(--accent)" }}>Free</span></div>
-                <div className="row between"><span className="muted">Tax (10% GST)</span><span>${(subtotal * 0.1).toFixed(2)}</span></div>
+                <div className="row between"><span className="muted">Platform/service fee</span><span>${estimatedMarkup}</span></div>
               </div>
               <div className="row between" style={{ borderTop: "1px solid var(--border)", marginTop: 12, paddingTop: 12 }}>
                 <b>Total today</b>
-                <b style={{ fontFamily: "var(--serif)", fontSize: 24 }}>${(subtotal * 1.1).toFixed(2)}</b>
+                <b style={{ fontFamily: "var(--serif)", fontSize: 24 }}>${estimatedTotal}</b>
               </div>
               {error && (
                 <div style={{ color: "var(--danger)", fontSize: 13, marginTop: 12, padding: '10px 12px', background: 'var(--bg-deep)', borderRadius: 'var(--r-sm)', border: '1px solid var(--danger)' }}>
@@ -894,6 +923,74 @@ function PayPill({ icon, label, active, onClick }) {
       <Icon size={15} /> {label}
     </button>
   );
+}
+
+function PayPalCheckoutButton({ disabled, createOrder, captureOrder, onPaid, onError }) {
+  const ref = useRef(null);
+  const checkoutRef = useRef(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let buttons = null;
+    const render = async () => {
+      try {
+        const settings = await getPayPalClientSettings();
+        if (!settings.configured || !settings.clientId) throw new Error('PayPal is not configured yet.');
+        await loadPayPalSdk(settings.clientId);
+        if (cancelled || !ref.current || !window.paypal?.Buttons) return;
+        ref.current.innerHTML = '';
+        buttons = window.paypal.Buttons({
+          style: { layout: 'vertical', shape: 'rect', label: 'paypal' },
+          onClick: () => {
+            if (disabled) {
+              onError?.('Complete the required checkout fields before paying.');
+              return false;
+            }
+            return true;
+          },
+          createOrder: async () => {
+            const order = await createOrder();
+            checkoutRef.current = order.checkoutOrderId;
+            return order.providerOrderId;
+          },
+          onApprove: async (data) => {
+            const result = await captureOrder({ checkoutOrderId: checkoutRef.current, providerOrderId: data.orderID });
+            onPaid?.(result);
+          },
+          onError: (err) => onError?.(err?.message || 'PayPal checkout failed.'),
+          onCancel: () => onError?.('PayPal checkout was cancelled.'),
+        });
+        buttons.render(ref.current);
+      } catch (error) {
+        onError?.(error.message || 'PayPal checkout is unavailable.');
+      }
+    };
+    render();
+    return () => {
+      cancelled = true;
+      buttons?.close?.();
+    };
+  }, [disabled]);
+
+  return <div ref={ref} style={{ opacity: disabled ? 0.55 : 1, pointerEvents: disabled ? 'none' : 'auto' }} />;
+}
+
+function loadPayPalSdk(clientId) {
+  if (window.paypal?.Buttons) return Promise.resolve();
+  const existing = document.querySelector('script[data-glondia-paypal]');
+  if (existing) return new Promise((resolve, reject) => {
+    existing.addEventListener('load', resolve, { once: true });
+    existing.addEventListener('error', reject, { once: true });
+  });
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.dataset.glondiaPaypal = 'true';
+    script.src = `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(clientId)}&currency=USD&intent=capture`;
+    script.async = true;
+    script.onload = resolve;
+    script.onerror = () => reject(new Error('Could not load PayPal checkout.'));
+    document.head.appendChild(script);
+  });
 }
 
 function Done({ cart, subtotal, operations, onNew, onManage }) {

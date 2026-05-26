@@ -34,6 +34,8 @@ function emptyStore() {
     env: {},
     disks: {},
     domains: {},
+    checkoutOrders: [],
+    payments: [],
   };
 }
 
@@ -56,4 +58,3 @@ export function redactEnvValue(value) {
   if (!raw) return '';
   return raw.length <= 4 ? '****' : `${raw.slice(0, 2)}${'*'.repeat(Math.min(8, raw.length - 2))}`;
 }
-

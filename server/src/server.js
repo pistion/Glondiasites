@@ -32,6 +32,8 @@ import hostingRoutes from './routes/hostingRoutes.js';
 import environmentRoutes from './routes/environmentRoutes.js';
 import domainHostingRoutes from './routes/domainRoutes.js';
 import diskRoutes from './routes/diskRoutes.js';
+import deploymentService from './services/deploymentService.js';
+import { makeId, mutateHostingStore, nowIso, readHostingStore } from './services/hostingStore.js';
 
 dotenv.config({ path: '.env.local' });
 dotenv.config();
@@ -180,6 +182,47 @@ app.get('/api/render/services', async (req, res, next) => {
     }
     const result = await listRenderServices();
     res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/payments/paypal-client', (req, res) => {
+  res.json({
+    clientId: process.env.PAYPAL_CLIENT_ID || '',
+    configured: Boolean(process.env.PAYPAL_CLIENT_ID && process.env.PAYPAL_CLIENT_SECRET),
+    sandbox: String(process.env.PAYPAL_SANDBOX || 'true').toLowerCase() !== 'false',
+    markupPercent: getPlatformMarkupPercent(),
+  });
+});
+
+app.post('/api/payments/domain/create-order', providerApiGuard, async (req, res, next) => {
+  try {
+    res.json(await createDomainPaymentOrder(req.body || {}, req.user || {}));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/payments/domain/capture', providerApiGuard, async (req, res, next) => {
+  try {
+    res.json(await captureDomainPaymentOrder(req.body || {}, req.user || {}));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/payments/hosting/create-order', providerApiGuard, async (req, res, next) => {
+  try {
+    res.json(await createHostingPaymentOrder(req.body || {}, req.user || {}));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/payments/hosting/capture', providerApiGuard, async (req, res, next) => {
+  try {
+    res.json(await captureHostingPaymentOrder(req.body || {}, req.user || {}));
   } catch (error) {
     next(error);
   }
@@ -1282,6 +1325,353 @@ function fromSpaceshipDnsRecord(record = {}) {
   };
 }
 
+const FALLBACK_TLD_PRICE_CENTS = new Map([
+  ['.com', 1499], ['.com.pg', 4999], ['.com.fj', 5999], ['.com.vu', 4499],
+  ['.co', 2499], ['.io', 3999], ['.app', 1699], ['.dev', 1499],
+  ['.org', 1249], ['.net', 1199], ['.store', 499], ['.shop', 199],
+]);
+
+async function createDomainPaymentOrder(input = {}, user = {}) {
+  assertPayPalConfigured();
+  const domains = Array.isArray(input.domains) ? input.domains : [];
+  if (!domains.length) throw httpError('At least one domain is required.', 400);
+  const normalized = domains.map((item) => ({
+    name: cleanDomainName(item.name || item.hostname || item.domain),
+    years: Math.min(Math.max(Number(item.years || 1), 1), 10),
+  }));
+  const availability = await checkSpaceshipAvailability(normalized.map((item) => item.name));
+  const lines = normalized.map((item) => {
+    const row = availability.domains.find((candidate) => candidate.domain === item.name);
+    if (row && !row.available) throw httpError(`${item.name} is no longer available.`, 409);
+    const actualAmountCents = domainActualPriceCents(item.name, row) * item.years;
+    return { type: 'domain_registration', name: item.name, years: item.years, actualAmountCents };
+  });
+  return createCheckoutOrder({
+    type: 'domain_purchase',
+    user,
+    source: input,
+    lineItems: lines,
+    metadata: {
+      domains: normalized,
+      contact: sanitizeContact(input.contact || {}),
+      autoRenew: input.autoRenew !== false,
+      privacyProtection: input.privacyProtection !== false,
+    },
+  });
+}
+
+async function captureDomainPaymentOrder(input = {}, user = {}) {
+  const order = await getCheckoutOrder(input.checkoutOrderId);
+  if (order.type !== 'domain_purchase') throw httpError('Checkout order is not for a domain purchase.', 400);
+  if (order.status === 'paid') return order.result;
+  await capturePayPalOrder(input.providerOrderId || input.orderId || order.providerOrderId);
+  const contact = order.metadata.contact || {};
+  const createdContact = await saveSpaceshipContact(contact);
+  const contactId = createdContact.contactId || createdContact.id;
+  const operations = [];
+  for (const item of order.metadata.domains || []) {
+    const availability = await checkSpaceshipAvailability([item.name]);
+    const row = availability.domains[0];
+    if (row && !row.available) throw httpError(`${item.name} is no longer available.`, 409);
+    const registered = await registerSpaceshipDomain(item.name, {
+      years: item.years || 1,
+      autoRenew: order.metadata.autoRenew !== false,
+      privacyProtection: order.metadata.privacyProtection !== false,
+      contactId,
+    });
+    operations.push({ domain: item.name, operationId: registered.operationId, status: registered.status });
+  }
+  const result = { status: 'paid', checkoutOrderId: order.id, operations, amounts: order.amounts };
+  await markCheckoutPaid(order.id, input.providerOrderId || input.orderId || order.providerOrderId, result, user);
+  return result;
+}
+
+async function createHostingPaymentOrder(input = {}, user = {}) {
+  assertPayPalConfigured();
+  const deploymentPayload = input.deployment || input;
+  if (!(deploymentPayload.repoUrl || deploymentPayload.repositoryUrl || deploymentPayload.sourceReference || deploymentPayload.renderServiceId || deploymentPayload.serviceId)) {
+    throw httpError('A repository or existing Render service is required before hosting checkout.', 400);
+  }
+  const actualAmountCents = hostingActualCostCents(deploymentPayload);
+  return createCheckoutOrder({
+    type: 'hosting_deployment',
+    user,
+    source: input,
+    lineItems: [{ type: 'render_deployment', name: deploymentPayload.name || deploymentPayload.serviceName || 'Render deployment', actualAmountCents }],
+    metadata: { deploymentPayload },
+  });
+}
+
+async function captureHostingPaymentOrder(input = {}, user = {}) {
+  const order = await getCheckoutOrder(input.checkoutOrderId);
+  if (order.type !== 'hosting_deployment') throw httpError('Checkout order is not for hosting.', 400);
+  if (order.status === 'paid') return order.result;
+  await capturePayPalOrder(input.providerOrderId || input.orderId || order.providerOrderId);
+  const deployment = await deploymentService.createRenderDeployment(order.metadata.deploymentPayload || {}, { userId: user.id || 'local-user' });
+  const result = { status: 'paid', checkoutOrderId: order.id, deployment, amounts: order.amounts };
+  await markCheckoutPaid(order.id, input.providerOrderId || input.orderId || order.providerOrderId, result, user);
+  return result;
+}
+
+async function createCheckoutOrder({ type, user, source, lineItems, metadata }) {
+  const actualAmountCents = lineItems.reduce((sum, item) => sum + item.actualAmountCents, 0);
+  const markupPercent = getPlatformMarkupPercent();
+  const markupAmountCents = Math.round(actualAmountCents * markupPercent / 100);
+  const totalAmountCents = actualAmountCents + markupAmountCents;
+  const id = makeId('checkout');
+  const amounts = {
+    currency: 'USD',
+    actualAmountCents,
+    markupPercent,
+    markupAmountCents,
+    totalAmountCents,
+    actualAmount: centsToUsd(actualAmountCents),
+    markupAmount: centsToUsd(markupAmountCents),
+    totalAmount: centsToUsd(totalAmountCents),
+  };
+  const paypal = await createPayPalOrder({
+    checkoutOrderId: id,
+    type,
+    totalAmountCents,
+    lineItems,
+    amounts,
+    returnUrl: source?.returnUrl,
+    cancelUrl: source?.cancelUrl,
+  });
+  const order = {
+    id,
+    organizationId: source?.organizationId || user.organizationId || 'local-org',
+    userId: user.id || 'local-user',
+    type,
+    provider: 'paypal',
+    providerOrderId: paypal.id,
+    status: 'pending',
+    currency: 'USD',
+    actualAmountCents,
+    markupPercent,
+    markupAmountCents,
+    totalAmountCents,
+    amounts,
+    lineItems,
+    metadata,
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+  };
+  await mutateHostingStore((store) => {
+    store.checkoutOrders = store.checkoutOrders || [];
+    store.payments = store.payments || [];
+    store.checkoutOrders.unshift(order);
+    return order;
+  });
+  return { checkoutOrderId: id, providerOrderId: paypal.id, approvalUrl: paypal.approvalUrl, amounts, lineItems };
+}
+
+async function getCheckoutOrder(checkoutOrderId) {
+  const id = String(checkoutOrderId || '').trim();
+  if (!id) throw httpError('checkoutOrderId is required.', 400);
+  const store = await readHostingStore();
+  const order = (store.checkoutOrders || []).find((item) => item.id === id);
+  if (!order) throw httpError('Checkout order not found.', 404);
+  return order;
+}
+
+async function markCheckoutPaid(checkoutOrderId, providerCaptureId, result, user = {}) {
+  return mutateHostingStore((store) => {
+    const order = (store.checkoutOrders || []).find((item) => item.id === checkoutOrderId);
+    if (!order) return result;
+    if (order.status === 'paid') return order.result;
+    Object.assign(order, {
+      status: 'paid',
+      providerCaptureId,
+      result,
+      updatedAt: nowIso(),
+    });
+    store.payments = store.payments || [];
+    store.payments.unshift({
+      id: makeId('pay'),
+      checkoutOrderId: order.id,
+      organizationId: order.organizationId,
+      userId: user.id || order.userId,
+      type: order.type,
+      provider: 'paypal',
+      providerOrderId: order.providerOrderId,
+      providerCaptureId,
+      status: 'paid',
+      currency: order.currency,
+      actualAmountCents: order.actualAmountCents,
+      markupPercent: order.markupPercent,
+      markupAmountCents: order.markupAmountCents,
+      totalAmountCents: order.totalAmountCents,
+      metadata: order.metadata,
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    });
+    return result;
+  });
+}
+
+async function createPayPalOrder({ checkoutOrderId, type, totalAmountCents, lineItems, amounts, returnUrl, cancelUrl }) {
+  const token = await getPayPalAccessToken();
+  const body = {
+    intent: 'CAPTURE',
+    purchase_units: [{
+      reference_id: checkoutOrderId,
+      custom_id: `${type}:${checkoutOrderId}`,
+      description: type === 'domain_purchase' ? 'Glondia domain registration' : 'Glondia Render deployment',
+      amount: {
+        currency_code: 'USD',
+        value: centsToUsd(totalAmountCents),
+        breakdown: {
+          item_total: { currency_code: 'USD', value: centsToUsd(totalAmountCents) },
+        },
+      },
+      items: [
+        ...lineItems.map((item) => ({
+          name: item.name,
+          quantity: '1',
+          unit_amount: { currency_code: 'USD', value: centsToUsd(item.actualAmountCents) },
+          category: 'DIGITAL_GOODS',
+        })),
+        ...(amounts.markupAmountCents > 0 ? [{
+          name: 'Glondia platform service fee',
+          quantity: '1',
+          unit_amount: { currency_code: 'USD', value: centsToUsd(amounts.markupAmountCents) },
+          category: 'DIGITAL_GOODS',
+        }] : []),
+      ],
+    }],
+    application_context: {
+      brand_name: 'Glondia',
+      shipping_preference: 'NO_SHIPPING',
+      user_action: 'PAY_NOW',
+      return_url: safeReturnUrl(returnUrl),
+      cancel_url: safeReturnUrl(cancelUrl || returnUrl),
+    },
+  };
+  const response = await fetch(`${paypalBaseUrl()}/v2/checkout/orders`, {
+    method: 'POST',
+    headers: await paypalHeaders(),
+    body: JSON.stringify(body),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw httpError(payload?.message || 'PayPal order creation failed.', response.status, payload);
+  return { id: payload.id, approvalUrl: payload.links?.find((link) => link.rel === 'approve')?.href, payload };
+}
+
+async function capturePayPalOrder(providerOrderId) {
+  const id = String(providerOrderId || '').trim();
+  if (!id) throw httpError('PayPal order id is required.', 400);
+  const response = await fetch(`${paypalBaseUrl()}/v2/checkout/orders/${encodeURIComponent(id)}/capture`, {
+    method: 'POST',
+    headers: await paypalHeaders(),
+    body: JSON.stringify({}),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw httpError(payload?.message || 'PayPal capture failed.', response.status, payload);
+  if (payload.status !== 'COMPLETED') throw httpError(`PayPal capture status is ${payload.status || 'unknown'}.`, 409, payload);
+  return payload;
+}
+
+let paypalTokenCache = { token: '', expiresAt: 0 };
+async function getPayPalAccessToken() {
+  assertPayPalConfigured();
+  if (paypalTokenCache.token && Date.now() < paypalTokenCache.expiresAt) return paypalTokenCache.token;
+  const credentials = Buffer.from(`${process.env.PAYPAL_CLIENT_ID}:${process.env.PAYPAL_CLIENT_SECRET}`).toString('base64');
+  const response = await fetch(`${paypalBaseUrl()}/v1/oauth2/token`, {
+    method: 'POST',
+    headers: { Authorization: `Basic ${credentials}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'grant_type=client_credentials',
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw httpError('Failed to authenticate with PayPal.', response.status, payload);
+  paypalTokenCache = { token: payload.access_token, expiresAt: Date.now() + Math.max(0, Number(payload.expires_in || 300) - 60) * 1000 };
+  return paypalTokenCache.token;
+}
+
+async function paypalHeaders() {
+  return {
+    Authorization: `Bearer ${await getPayPalAccessToken()}`,
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+    Prefer: 'return=representation',
+  };
+}
+
+function paypalBaseUrl() {
+  return String(process.env.PAYPAL_SANDBOX || 'true').toLowerCase() === 'false'
+    ? 'https://api-m.paypal.com'
+    : 'https://api-m.sandbox.paypal.com';
+}
+
+function assertPayPalConfigured() {
+  if (process.env.PAYPAL_CLIENT_ID && process.env.PAYPAL_CLIENT_SECRET) return;
+  throw httpError('PayPal credentials are not configured. Add PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET.', 503);
+}
+
+function getPlatformMarkupPercent() {
+  const raw = process.env.PLATFORM_MARKUP_PERCENT;
+  if (raw === undefined || raw === '') return 30;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) return 30;
+  return value;
+}
+
+function domainActualPriceCents(domain, availabilityRow) {
+  const premium = availabilityRow?.pricing?.amount;
+  if (premium != null && Number.isFinite(Number(premium))) return Math.max(0, Math.round(Number(premium)));
+  const tld = [...FALLBACK_TLD_PRICE_CENTS.keys()].sort((a, b) => b.length - a.length).find((suffix) => domain.endsWith(suffix));
+  if (!tld) throw httpError(`No registrar price is configured for ${domain}.`, 400);
+  return FALLBACK_TLD_PRICE_CENTS.get(tld);
+}
+
+function hostingActualCostCents(input = {}) {
+  const supplied = Number(input.actualAmountCents || input.hostingCostCents || 0);
+  if (Number.isFinite(supplied) && supplied > 0) return Math.round(supplied);
+  const plan = String(input.plan || 'starter').toLowerCase();
+  if (plan === 'free') return 0;
+  if (plan === 'standard') return 2500;
+  if (plan === 'pro') return 8500;
+  return 700;
+}
+
+function sanitizeContact(input = {}) {
+  return {
+    firstName: String(input.firstName || '').trim(),
+    lastName: String(input.lastName || '').trim(),
+    company: String(input.company || '').trim() || undefined,
+    email: String(input.email || '').trim(),
+    phone: String(input.phone || '').trim(),
+    address1: String(input.address1 || '').trim(),
+    address2: String(input.address2 || '').trim() || undefined,
+    city: String(input.city || '').trim(),
+    postalCode: String(input.postalCode || '').trim(),
+    country: String(input.country || '').trim().toUpperCase(),
+  };
+}
+
+function centsToUsd(cents) {
+  return (Math.max(0, Math.round(Number(cents) || 0)) / 100).toFixed(2);
+}
+
+function safeReturnUrl(value) {
+  const fallback = process.env.FRONTEND_URL || process.env.PUBLIC_APP_URL || 'http://localhost:5173';
+  try {
+    const url = new URL(value || fallback);
+    if (!['http:', 'https:'].includes(url.protocol)) return fallback;
+    return url.toString();
+  } catch {
+    return fallback;
+  }
+}
+
+function httpError(message, status = 400, details) {
+  const error = new Error(message);
+  error.status = status;
+  error.details = details;
+  error.expose = true;
+  return error;
+}
+
 app.use((err, req, res, next) => {
   const status = err.status || err.statusCode || 500;
   console.error(`[error] ${req.method} ${req.url} →`, err.message || err);
@@ -1291,7 +1681,11 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`[glondia] API + static server listening on port ${PORT}`);
-  console.log(`[glondia] Serving Vite app from ${distDir}`);
-});
+if (process.env.NODE_ENV !== 'test') {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`[glondia] API + static server listening on port ${PORT}`);
+    console.log(`[glondia] Serving Vite app from ${distDir}`);
+  });
+}
+
+export default app;

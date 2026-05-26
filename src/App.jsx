@@ -24,7 +24,7 @@ import { DomainsMine, DomainsBuy, DnsEditor } from './domains';
 import { BuilderGallery, BuilderTemplates, BuilderRoxanne, BuilderImport, BuilderEditor } from './builder';
 import { ActivityPage } from './activity';
 import { useBilling } from './use-billing';
-import { notifyDataChanged } from './api';
+import { captureHostingPayPalOrder, notifyDataChanged } from './api';
 
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "theme": "dark",
@@ -112,6 +112,25 @@ export default function App() {
   // GitHub OAuth callback compatibility for previously connected URLs.
   useEffectApp(() => {
     const params = new URLSearchParams(window.location.search);
+    const pendingHosting = sessionStorage.getItem('glondia:pending-hosting-checkout');
+    if (pendingHosting && params.get('token')) {
+      const { checkoutOrderId } = JSON.parse(pendingHosting);
+      sessionStorage.removeItem('glondia:pending-hosting-checkout');
+      const clean = new URL(window.location.href);
+      clean.search = '';
+      window.history.replaceState({}, '', clean.toString());
+      setGithubBanner('PayPal approved. Starting Render deployment...');
+      captureHostingPayPalOrder({ checkoutOrderId, providerOrderId: params.get('token') })
+        .then((result) => {
+          const deploymentId = result?.deployment?.deploymentId;
+          setRoute(deploymentId ? { view: 'hosting-detail', params: { id: deploymentId } } : { view: 'hosting-list' });
+          setGithubBanner('Payment captured. Render deployment started.');
+          notifyDataChanged();
+        })
+        .catch((error) => setGithubBanner(error.message || 'Payment capture failed.'))
+        .finally(() => setTimeout(() => setGithubBanner(null), 7000));
+      return;
+    }
     if (params.get('github_connected') === '1') {
       const login = params.get('login') || '';
       setGithubBanner(login ? `GitHub connected as @${login}.` : 'GitHub connected successfully.');

@@ -546,6 +546,75 @@ model BillingUsageRecord {
   @@map("billing_usage_records")
 }
 
+model CheckoutOrder {
+  id                String   @id @default(uuid())
+  organizationId    String   @map("organization_id")
+  userId            String?  @map("user_id")
+  type              String
+  provider          String   @default("paypal")
+  providerOrderId   String?  @unique @map("provider_order_id")
+  providerCaptureId String?  @map("provider_capture_id")
+  status            String   @default("pending")
+  currency          String   @default("USD")
+  actualAmountCents Int      @default(0) @map("actual_amount_cents")
+  markupPercent     Decimal  @default(30) @map("markup_percent")
+  markupAmountCents Int      @default(0) @map("markup_amount_cents")
+  totalAmountCents  Int      @default(0) @map("total_amount_cents")
+  metadata          String   @default("{}")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  payments Payment[]
+
+  @@index([organizationId, status])
+  @@index([type, createdAt])
+  @@map("checkout_orders")
+}
+
+model Payment {
+  id                String   @id @default(uuid())
+  checkoutOrderId   String   @map("checkout_order_id")
+  organizationId    String   @map("organization_id")
+  userId            String?  @map("user_id")
+  type              String
+  provider          String   @default("paypal")
+  providerOrderId   String?  @map("provider_order_id")
+  providerCaptureId String?  @map("provider_capture_id")
+  status            String   @default("pending")
+  currency          String   @default("USD")
+  actualAmountCents Int      @default(0) @map("actual_amount_cents")
+  markupPercent     Decimal  @default(30) @map("markup_percent")
+  markupAmountCents Int      @default(0) @map("markup_amount_cents")
+  totalAmountCents  Int      @default(0) @map("total_amount_cents")
+  metadata          String   @default("{}")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  checkoutOrder CheckoutOrder @relation(fields: [checkoutOrderId], references: [id], onDelete: Cascade)
+  lineItems     PaymentLineItem[]
+
+  @@index([organizationId, status])
+  @@index([checkoutOrderId])
+  @@map("payments")
+}
+
+model PaymentLineItem {
+  id                String   @id @default(uuid())
+  paymentId         String   @map("payment_id")
+  type              String
+  description       String
+  actualAmountCents Int      @default(0) @map("actual_amount_cents")
+  markupAmountCents Int      @default(0) @map("markup_amount_cents")
+  totalAmountCents  Int      @default(0) @map("total_amount_cents")
+  metadata          String   @default("{}")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@index([paymentId])
+  @@map("payment_line_items")
+}
+
 model Deployment {
   id                String                @id @default(uuid())
   organizationId    String                @map("organization_id")

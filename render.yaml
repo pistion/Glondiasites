@@ -33,3 +33,19 @@ services:
         sync: false
       - key: RENDER_SERVICE_ID
         sync: false
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      - key: PAYPAL_SANDBOX
+        value: true
+      - key: PLATFORM_MARKUP_PERCENT
+        value: 30
+      - key: PLATFORM_PAYPAL_EMAIL
+        sync: false
+      - key: DOMAIN_REGISTRAR_COST_ACCOUNT
+        sync: false
+      - key: HOSTING_COST_ACCOUNT
+        sync: false
