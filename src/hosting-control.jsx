@@ -11,10 +11,12 @@ import {
   deleteHostingDomain,
   deleteHostingEnvVar,
   getDeploymentLogStreamUrl,
+  getGitHubStatus,
   getHostingPaymentStatus,
   getHostingService,
   getPayPalClientSettings,
   getRenderDeploymentStatus,
+  getRenderSettings,
   listHostingDeployments,
   listHostingDomains,
   listHostingEnvVars,
@@ -26,11 +28,13 @@ import {
   verifyHostingDomain,
   verifyRenderDeploymentUrl,
 } from './api';
+import { isLiveMode } from './app/config.js';
 
 export function HostingList({ navigate }) {
-  const [apps, setApps] = useState([]);
+  const [apps, setApps]     = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [error, setError]   = useState('');
+  const [tab, setTab]       = useState('apps');
 
   useEffect(() => {
     let cancelled = false;
@@ -46,34 +50,66 @@ export function HostingList({ navigate }) {
       <div className="page-head">
         <div>
           <div className="page-eyebrow">Hosting</div>
-          <h1>Hosted apps</h1>
-          <p className="sub">Monitor deployments, open failed apps, and manage Render settings without leaving Glondia.</p>
+          <h1>Render Hosting</h1>
+          <p className="sub">Deploy and manage web apps on Render — linked to GitHub, imported from ZIP, or built with the Site Builder.</p>
         </div>
         <div className="actions">
-          <button className="btn btn-outline" onClick={() => navigate({ view: 'builder-gallery' })}><ICN.Layers size={14} /> Site builder</button>
-          <button className="btn btn-primary" onClick={() => navigate({ view: 'builder-import', params: { mode: 'github' } })}><ICN.Git size={14} /> Deploy from GitHub</button>
+          {tab === 'apps' && (
+            <>
+              <button className="btn btn-outline" onClick={() => navigate({ view: 'builder-gallery' })}>
+                <ICN.Layers size={14} /> Site builder
+              </button>
+              <button className="btn btn-primary" onClick={() => navigate({ view: 'builder-import', params: { mode: 'github' } })}>
+                <ICN.Git size={14} /> Deploy from GitHub
+              </button>
+            </>
+          )}
         </div>
       </div>
 
-      {error && <div className="card" style={{ padding: '10px 14px', color: 'var(--danger)', fontSize: 13 }}>{error}</div>}
+      <Tabs
+        value={tab}
+        onChange={setTab}
+        options={[
+          { value: 'apps',     label: 'My apps' },
+          { value: 'settings', label: 'Settings' },
+        ]}
+      />
 
-      {loading ? (
-        <div className="card" style={{ padding: '42px 24px' }}>
-          <Empty icon="Server" title="Loading hosting apps..." />
-        </div>
-      ) : apps.length === 0 ? (
-        <div className="card" style={{ padding: '48px 24px' }}>
-          <Empty
-            icon="Server"
-            title="No hosted apps yet"
-            body="Deploy from the site builder or import a GitHub project to create your first hosting app."
-            action={<button className="btn btn-primary" onClick={() => navigate({ view: 'builder-gallery' })}><ICN.Rocket size={14} /> Open site builder</button>}
-          />
-        </div>
+      {tab === 'apps' ? (
+        <>
+          {error && <div className="card" style={{ padding: '10px 14px', color: 'var(--danger)', fontSize: 13 }}>{error}</div>}
+
+          {loading ? (
+            <div className="card" style={{ padding: '42px 24px' }}>
+              <Empty icon="Server" title="Loading hosting apps..." />
+            </div>
+          ) : apps.length === 0 ? (
+            <div className="card" style={{ padding: '48px 24px' }}>
+              <Empty
+                icon="Server"
+                title="No hosted apps yet"
+                body="Deploy from GitHub or build with the Site Builder to create your first hosting app."
+                action={
+                  <div className="row" style={{ gap: 10 }}>
+                    <button className="btn btn-outline" onClick={() => navigate({ view: 'builder-gallery' })}>
+                      <ICN.Layers size={14} /> Site builder
+                    </button>
+                    <button className="btn btn-primary" onClick={() => navigate({ view: 'builder-import', params: { mode: 'github' } })}>
+                      <ICN.Git size={14} /> Deploy from GitHub
+                    </button>
+                  </div>
+                }
+              />
+            </div>
+          ) : (
+            <div className="grid-2">
+              {apps.map((app) => <HostingAppCard key={app.deploymentId} app={app} navigate={navigate} />)}
+            </div>
+          )}
+        </>
       ) : (
-        <div className="grid-2">
-          {apps.map((app) => <HostingAppCard key={app.deploymentId} app={app} navigate={navigate} />)}
-        </div>
+        <HostingSettings />
       )}
     </>
   );
@@ -968,4 +1004,194 @@ function loadPayPalSdkForHosting(clientId) {
     script.onerror = () => reject(new Error('Could not load PayPal checkout.'));
     document.head.appendChild(script);
   });
+}
+
+// ─── Hosting Settings & integrations ─────────────────────────────────────────
+
+function HostingSettings() {
+  const [renderCfg, setRenderCfg]   = useState(null);
+  const [githubCfg, setGithubCfg]   = useState(null);
+  const [loading, setLoading]       = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    Promise.all([getRenderSettings(), getGitHubStatus()])
+      .then(([r, g]) => {
+        if (!alive) return;
+        setRenderCfg(r);
+        setGithubCfg(g);
+      })
+      .catch(() => {})
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, []);
+
+  if (loading) return (
+    <div className="card" style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
+      Loading settings…
+    </div>
+  );
+
+  const demo      = isLiveMode() === false;
+  const renderOk  = renderCfg?.configured  ?? false;
+  const githubOk  = githubCfg?.connected   ?? false;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+      {demo && (
+        <div className="card" style={{
+          padding: '14px 18px', fontSize: 13,
+          borderLeft: '3px solid var(--accent)', background: 'var(--accent-soft)',
+        }}>
+          <span style={{ fontWeight: 600 }}>Demo mode active</span>
+          {' '}— real deployments are disabled. Set <code className="mono">VITE_APP_MODE=live</code> on your frontend to enable live Render API calls.
+        </div>
+      )}
+
+      {/* ── Integration status cards ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
+
+        <div className="card">
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+            <span style={{
+              width: 42, height: 42, borderRadius: 10, flexShrink: 0,
+              background: renderOk ? 'var(--accent-soft)' : 'rgba(239,68,68,.1)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: renderOk ? 'var(--accent)' : 'var(--danger)',
+            }}>
+              <ICN.Server size={18} />
+            </span>
+            <div style={{ flex: 1 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <span style={{ fontWeight: 700 }}>Render API</span>
+                <StatusBadge value={renderOk ? 'connected' : 'error'} />
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: 10 }}>
+                {renderOk
+                  ? 'Connected. Deployments can be triggered and monitored via Render.'
+                  : 'Not configured. Add RENDER_API_KEY and RENDER_OWNER_ID to enable deployments.'}
+              </div>
+              <div className="mono" style={{ fontSize: 11, background: 'var(--bg-deep)', borderRadius: 6, padding: '6px 10px', color: 'var(--text-faint)' }}>
+                RENDER_API_KEY · RENDER_OWNER_ID
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="card">
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+            <span style={{
+              width: 42, height: 42, borderRadius: 10, flexShrink: 0,
+              background: githubOk ? 'var(--accent-soft)' : 'rgba(239,68,68,.1)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: githubOk ? 'var(--accent)' : 'var(--danger)',
+            }}>
+              <ICN.Git size={18} />
+            </span>
+            <div style={{ flex: 1 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <span style={{ fontWeight: 700 }}>GitHub</span>
+                <StatusBadge value={githubOk ? 'connected' : demo ? 'warn' : 'error'} />
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: 10 }}>
+                {githubOk
+                  ? `Connected as @${githubCfg?.login || 'user'}. Repos are accessible for import and auto-deploy.`
+                  : 'Connect your GitHub account to deploy from repositories and enable push-to-deploy.'}
+              </div>
+              <div className="mono" style={{ fontSize: 11, background: 'var(--bg-deep)', borderRadius: 6, padding: '6px 10px', color: 'var(--text-faint)' }}>
+                GITHUB_CLIENT_ID · GITHUB_CLIENT_SECRET
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="card">
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+            <span style={{
+              width: 42, height: 42, borderRadius: 10, flexShrink: 0,
+              background: 'var(--accent-soft)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: 'var(--accent)',
+            }}>
+              <ICN.CreditCard size={18} />
+            </span>
+            <div style={{ flex: 1 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <span style={{ fontWeight: 700 }}>Billing (PayPal)</span>
+                <StatusBadge value="info" />
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: 10 }}>
+                Customers pay per deployment via PayPal or BSP bank transfer.
+                Payment records are stored in the Glondia database per deployment.
+              </div>
+              <div className="mono" style={{ fontSize: 11, background: 'var(--bg-deep)', borderRadius: 6, padding: '6px 10px', color: 'var(--text-faint)' }}>
+                PAYPAL_CLIENT_ID · PAYPAL_CLIENT_SECRET
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── How deployment works ── */}
+      <div className="card">
+        <div className="card-head"><h2>How Render hosting works</h2></div>
+        <div style={{ padding: '0 16px 20px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))', gap: 14 }}>
+          {[
+            { n: '1', title: 'Connect GitHub',        body: 'Link your GitHub account — all repos are listed for import and auto-deploy on push.' },
+            { n: '2', title: 'Choose a source',       body: 'Deploy from a GitHub repo, upload a ZIP, or build a site with the AI Site Builder.' },
+            { n: '3', title: 'Glondia → Render',      body: 'Our backend sends the build config to the Render API and tracks the deployment.' },
+            { n: '4', title: 'Live URL returned',     body: 'Render builds, deploys, and returns a live HTTPS URL — visible from your dashboard.' },
+            { n: '5', title: 'Manage & redeploy',     body: 'Edit env vars, attach persistent disk, add custom domains, and tail build logs — all from here.' },
+          ].map(({ n, title, body }) => (
+            <div key={n} style={{ padding: 14, background: 'var(--bg-deep)', borderRadius: 'var(--r)' }}>
+              <div style={{
+                width: 28, height: 28, borderRadius: '50%',
+                background: 'var(--accent)', color: '#fff',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontWeight: 800, fontSize: 13, marginBottom: 10,
+              }}>{n}</div>
+              <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>{title}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>{body}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Required env vars ── */}
+      <div className="card card-flush">
+        <div className="card-head">
+          <h2>Environment variables</h2>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Set on your Render backend service</span>
+        </div>
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th>Variable</th>
+              <th>Purpose</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {[
+              { key: 'RENDER_API_KEY',        purpose: 'Authenticate with Render API for deploy + status',      ok: renderOk },
+              { key: 'RENDER_OWNER_ID',       purpose: 'Target Render account / team for new services',         ok: renderOk },
+              { key: 'GITHUB_CLIENT_ID',      purpose: 'GitHub OAuth App — enables repo listing & connect',     ok: githubOk },
+              { key: 'GITHUB_CLIENT_SECRET',  purpose: 'GitHub OAuth App secret',                              ok: githubOk },
+              { key: 'PAYPAL_CLIENT_ID',      purpose: 'PayPal REST API — enables payment checkout',            ok: false },
+              { key: 'PAYPAL_CLIENT_SECRET',  purpose: 'PayPal REST API secret',                               ok: false },
+              { key: 'VITE_APP_MODE=live',    purpose: 'Frontend env var — switches from demo to live API',     ok: !demo },
+            ].map(({ key, purpose, ok }) => (
+              <tr key={key}>
+                <td className="mono" style={{ fontSize: 12 }}>{key}</td>
+                <td style={{ fontSize: 13, color: 'var(--text-muted)' }}>{purpose}</td>
+                <td><StatusBadge value={ok ? 'connected' : 'error'} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+  );
 }
