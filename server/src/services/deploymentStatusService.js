@@ -16,7 +16,18 @@ class DeploymentStatusService {
 
   async refreshDeployment(deployment) {
     if (!deployment?.renderServiceId) {
-      return deployment;
+      return mutateHostingStore((store) => {
+        const stored = store.deployments.find((item) => item.deploymentId === deployment.deploymentId);
+        if (!stored) return deployment;
+        Object.assign(stored, {
+          status: 'failed',
+          buildStatus: 'not_started',
+          currentStep: 'Render deployment not started',
+          errorMessage: stored.errorMessage || 'Render deployment has not started. A real Render service ID is required.',
+          updatedAt: nowIso(),
+        });
+        return stored;
+      });
     }
     let deploy = null;
     try {

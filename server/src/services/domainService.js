@@ -2,61 +2,76 @@ import renderApiService from './renderApiService.js';
 import { makeId, mutateHostingStore, nowIso, readHostingStore } from './hostingStore.js';
 
 class DomainService {
-  async add(serviceId, input = {}) {
+  async add(deploymentId, input = {}) {
+    const deployment = await findDeployment(deploymentId);
     const name = cleanDomain(input.domain || input.name || input.hostname);
-    let renderDomain = null;
-    if (renderApiService.configured()) renderDomain = await renderApiService.addCustomDomain(serviceId, name);
+    const renderDomain = await renderApiService.addCustomDomain(deployment.renderServiceId, name);
     return mutateHostingStore((store) => {
       const domain = {
         domainId: renderDomain?.customDomain?.id || renderDomain?.id || makeId('domain'),
         name,
-        status: renderDomain ? 'pending_verification' : 'pending_configuration',
-        verificationStatus: 'pending',
-        sslStatus: 'pending',
-        dnsRecords: dnsRecordsFor(name),
+        status: renderDomain?.status || 'pending_verification',
+        verificationStatus: renderDomain?.verificationStatus || renderDomain?.status || 'pending',
+        sslStatus: renderDomain?.certificateStatus || renderDomain?.sslStatus || 'pending',
+        dnsRecords: extractDnsRecords(renderDomain, name, deployment.liveUrl),
         renderDomain,
         createdAt: nowIso(),
         updatedAt: nowIso(),
       };
-      store.domains[serviceId] = [domain, ...(store.domains[serviceId] || [])];
-      updateDeploymentDomains(store, serviceId);
+      store.domains[deployment.deploymentId] = [domain, ...(store.domains[deployment.deploymentId] || [])];
+      updateDeploymentDomains(store, deployment.deploymentId);
       return domain;
     });
   }
 
-  async list(serviceId) {
+  async list(deploymentId) {
+    const deployment = await findDeployment(deploymentId, false);
     const store = await readHostingStore();
-    return store.domains[serviceId] || [];
+    return store.domains[deployment.deploymentId] || [];
   }
 
-  async status(serviceId, domainId) {
+  async status(deploymentId, domainId) {
+    const deployment = await findDeployment(deploymentId);
     const store = await readHostingStore();
-    const domain = (store.domains[serviceId] || []).find((item) => item.domainId === domainId);
+    const domain = (store.domains[deployment.deploymentId] || []).find((item) => item.domainId === domainId);
     if (!domain) throw notFound('Domain not found.');
-    let renderDomain = null;
-    if (renderApiService.configured()) renderDomain = await renderApiService.getCustomDomain(serviceId, domainId);
+    const renderDomain = await renderApiService.getCustomDomain(deployment.renderServiceId, domainId);
     return mutateHostingStore((nextStore) => {
-      const item = (nextStore.domains[serviceId] || []).find((row) => row.domainId === domainId);
+      const item = (nextStore.domains[deployment.deploymentId] || []).find((row) => row.domainId === domainId);
       if (renderDomain && item) {
         item.renderDomain = renderDomain;
         item.verificationStatus = renderDomain.verificationStatus || renderDomain.status || item.verificationStatus;
         item.sslStatus = renderDomain.certificateStatus || renderDomain.sslStatus || item.sslStatus;
         item.status = normalizeDomainStatus(item.verificationStatus, item.sslStatus);
+        item.dnsRecords = extractDnsRecords(renderDomain, item.name, deployment.liveUrl);
         item.updatedAt = nowIso();
-        updateDeploymentDomains(nextStore, serviceId);
+        updateDeploymentDomains(nextStore, deployment.deploymentId);
       }
       return item || domain;
     });
   }
 
-  async remove(serviceId, domainId) {
-    if (renderApiService.configured()) await renderApiService.deleteCustomDomain(serviceId, domainId);
+  async remove(deploymentId, domainId) {
+    const deployment = await findDeployment(deploymentId);
+    await renderApiService.deleteCustomDomain(deployment.renderServiceId, domainId);
     return mutateHostingStore((store) => {
-      store.domains[serviceId] = (store.domains[serviceId] || []).filter((item) => item.domainId !== domainId);
-      updateDeploymentDomains(store, serviceId);
+      store.domains[deployment.deploymentId] = (store.domains[deployment.deploymentId] || []).filter((item) => item.domainId !== domainId);
+      updateDeploymentDomains(store, deployment.deploymentId);
       return { deleted: true, domainId };
     });
   }
+}
+
+async function findDeployment(deploymentId, requireRender = true) {
+  const store = await readHostingStore();
+  const deployment = store.deployments.find((item) => item.deploymentId === deploymentId || item.renderServiceId === deploymentId);
+  if (!deployment) throw notFound('Hosting deployment not found.');
+  if (requireRender && !deployment.renderServiceId) {
+    const error = new Error('Render deployment has not started. A real Render service ID is required.');
+    error.status = 409;
+    throw error;
+  }
+  return deployment;
 }
 
 function cleanDomain(value) {
@@ -69,9 +84,11 @@ function cleanDomain(value) {
   return domain;
 }
 
-function dnsRecordsFor(domain) {
+function extractDnsRecords(renderDomain, domain, liveUrl) {
+  const records = renderDomain?.dnsRecords || renderDomain?.verification?.dnsRecords || renderDomain?.customDomain?.dnsRecords;
+  if (Array.isArray(records) && records.length) return records;
   return [
-    { type: 'CNAME', name: domain.startsWith('www.') ? domain : `www.${domain}`, value: 'your-service.onrender.com', ttl: 300 },
+    { type: 'CNAME', name: domain.startsWith('www.') ? domain : `www.${domain}`, value: liveUrl ? liveUrl.replace(/^https?:\/\//, '') : 'your-service.onrender.com', ttl: 300 },
     { type: 'A', name: domain.replace(/^www\./, '@'), value: '216.24.57.1', ttl: 300 },
   ];
 }
@@ -82,7 +99,7 @@ function normalizeDomainStatus(verificationStatus, sslStatus) {
 }
 
 function updateDeploymentDomains(store, serviceId) {
-  const deployment = store.deployments.find((item) => item.renderServiceId === serviceId || item.deploymentId === serviceId);
+  const deployment = store.deployments.find((item) => item.deploymentId === serviceId);
   if (!deployment) return;
   deployment.domainMetadata = store.domains[serviceId] || [];
   deployment.updatedAt = nowIso();
@@ -95,4 +112,3 @@ function notFound(message) {
 }
 
 export default new DomainService();
-

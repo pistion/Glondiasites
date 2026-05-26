@@ -22,12 +22,10 @@ class HostingService {
 
   async updateSettings(deploymentId, settings = {}) {
     const current = await this.getService(deploymentId);
-    let renderSettings = null;
-    if (current.renderServiceId && renderApiService.configured()) {
-      renderSettings = await renderApiService.updateService(current.renderServiceId, settings.render || settings);
-    }
+    if (!current.renderServiceId) throw conflict('Render deployment has not started. A real Render service ID is required.');
+    const renderSettings = await renderApiService.updateService(current.renderServiceId, settings.render || settings);
     return mutateHostingStore((store) => {
-      const deployment = store.deployments.find((item) => item.renderServiceId === deploymentId || item.deploymentId === deploymentId);
+      const deployment = store.deployments.find((item) => item.deploymentId === current.deploymentId);
       deployment.environmentConfiguration = {
         ...deployment.environmentConfiguration,
         ...settings,
@@ -40,10 +38,8 @@ class HostingService {
 
   async suspend(deploymentId) {
     const current = await this.getService(deploymentId);
-    let renderResult = null;
-    if (current.renderServiceId && renderApiService.configured()) {
-      renderResult = await renderApiService.suspendService(current.renderServiceId);
-    }
+    if (!current.renderServiceId) throw conflict('Render deployment has not started. A real Render service ID is required.');
+    const renderResult = await renderApiService.suspendService(current.renderServiceId);
     return mutateHostingStore((store) => {
       const deployment = store.deployments.find((item) => item.deploymentId === current.deploymentId);
       deployment.status = 'suspended';
@@ -57,10 +53,8 @@ class HostingService {
 
   async delete(deploymentId) {
     const current = await this.getService(deploymentId);
-    let renderResult = null;
-    if (current.renderServiceId && renderApiService.configured()) {
-      renderResult = await renderApiService.deleteService(current.renderServiceId);
-    }
+    if (!current.renderServiceId) throw conflict('Render deployment has not started. A real Render service ID is required.');
+    const renderResult = await renderApiService.deleteService(current.renderServiceId);
     return mutateHostingStore((store) => {
       const deployment = store.deployments.find((item) => item.deploymentId === current.deploymentId);
       deployment.status = 'deleted';
@@ -105,6 +99,12 @@ class HostingService {
 function notFound(message) {
   const error = new Error(message);
   error.status = 404;
+  return error;
+}
+
+function conflict(message) {
+  const error = new Error(message);
+  error.status = 409;
   return error;
 }
 

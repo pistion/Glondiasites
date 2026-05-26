@@ -178,17 +178,23 @@ export async function getRenderDeploymentStatus(deploymentId) {
   return hostingRequest(`/deployments/${deploymentId}/status`);
 }
 
+export const getDeploymentStatus = getRenderDeploymentStatus;
+
 export async function verifyRenderDeploymentUrl(deploymentId) {
   const deployment = await hostingRequest(`/deployments/${deploymentId}/verify-url`, { method: 'POST' });
   notifyDataChanged();
   return deployment;
 }
 
+export const verifyDeploymentUrl = verifyRenderDeploymentUrl;
+
 export async function redeployRenderDeployment(deploymentId, input = {}) {
   const deployment = await hostingRequest(`/deployments/${deploymentId}/redeploy`, { method: 'POST', body: JSON.stringify(input) });
   notifyDataChanged();
   return deployment;
 }
+
+export const redeployDeployment = redeployRenderDeployment;
 
 export async function getRenderDeploymentLogs(deploymentId) {
   return hostingRequest(`/deployments/${deploymentId}/logs`);
@@ -198,9 +204,13 @@ export async function listHostingDeployments() {
   return hostingRequest('/hosting');
 }
 
+export const listHostingApps = listHostingDeployments;
+
 export async function getHostingService(deploymentId) {
   return hostingRequest(`/hosting/${deploymentId}`);
 }
+
+export const getHostingApp = getHostingService;
 
 export async function updateHostingSettings(deploymentId, input) {
   const service = await hostingRequest(`/hosting/${deploymentId}/settings`, { method: 'PATCH', body: JSON.stringify(input) });
@@ -214,11 +224,17 @@ export async function suspendHostingDeployment(deploymentId) {
   return service;
 }
 
+export const suspendHostingApp = suspendHostingDeployment;
+
 export async function deleteHostingDeployment(deploymentId) {
   const result = await hostingRequest(`/hosting/${deploymentId}`, { method: 'DELETE' });
   notifyDataChanged();
   return result;
 }
+
+export const deleteHostingApp = deleteHostingDeployment;
+
+export const redeployHostingApp = redeployRenderDeployment;
 
 export async function listHostingEnvVars(deploymentId) {
   return hostingRequest(`/hosting/${deploymentId}/env`);
@@ -229,6 +245,8 @@ export async function upsertHostingEnvVar(deploymentId, input) {
   notifyDataChanged();
   return envVar;
 }
+
+export const createHostingEnvVar = upsertHostingEnvVar;
 
 export async function updateHostingEnvVar(deploymentId, key, input) {
   const envVar = await hostingRequest(`/hosting/${deploymentId}/env/${encodeURIComponent(key)}`, { method: 'PATCH', body: JSON.stringify(input) });
@@ -252,11 +270,15 @@ export async function listHostingDisks(deploymentId) {
   return hostingRequest(`/hosting/${deploymentId}/disk`);
 }
 
+export const getHostingDisk = listHostingDisks;
+
 export async function attachHostingDisk(deploymentId, input) {
   const disk = await hostingRequest(`/hosting/${deploymentId}/disk`, { method: 'POST', body: JSON.stringify(input) });
   notifyDataChanged();
   return disk;
 }
+
+export const createHostingDisk = attachHostingDisk;
 
 export async function updateHostingDisk(deploymentId, diskId, input) {
   const disk = await hostingRequest(`/hosting/${deploymentId}/disk/${diskId}`, { method: 'PATCH', body: JSON.stringify(input) });
@@ -275,6 +297,8 @@ export async function addHostingDomain(deploymentId, input) {
   notifyDataChanged();
   return domain;
 }
+
+export const createHostingDomain = addHostingDomain;
 
 export async function listHostingDomains(deploymentId) {
   return hostingRequest(`/hosting/${deploymentId}/domains`);

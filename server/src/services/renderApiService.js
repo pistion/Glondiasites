@@ -64,12 +64,12 @@ class RenderApiService {
   }
 
   async listEnvVars(serviceId) {
-    if (!this.configured()) return this.configurationRequired('list_env_vars');
+    this.assertConfigured('list_env_vars');
     return this.request(`/services/${encodeURIComponent(serviceId)}/env-vars?limit=100`);
   }
 
   async upsertEnvVars(serviceId, envVars = []) {
-    if (!this.configured()) return this.configurationRequired('upsert_env_vars');
+    this.assertConfigured('upsert_env_vars');
     const results = [];
     for (const envVar of envVars) {
       results.push(await this.request(`/services/${encodeURIComponent(serviceId)}/env-vars/${encodeURIComponent(envVar.key)}`, {
@@ -81,12 +81,12 @@ class RenderApiService {
   }
 
   async deleteEnvVar(serviceId, key) {
-    if (!this.configured()) return this.configurationRequired('delete_env_var');
+    this.assertConfigured('delete_env_var');
     return this.request(`/services/${encodeURIComponent(serviceId)}/env-vars/${encodeURIComponent(key)}`, { method: 'DELETE' });
   }
 
   async createDisk(serviceId, disk = {}) {
-    if (!this.configured()) return this.configurationRequired('create_disk');
+    this.assertConfigured('create_disk');
     return this.request(`/services/${encodeURIComponent(serviceId)}/disks`, {
       method: 'POST',
       body: {
@@ -98,7 +98,7 @@ class RenderApiService {
   }
 
   async updateDisk(serviceId, diskId, disk = {}) {
-    if (!this.configured()) return this.configurationRequired('update_disk');
+    this.assertConfigured('update_disk');
     return this.request(`/services/${encodeURIComponent(serviceId)}/disks/${encodeURIComponent(diskId)}`, {
       method: 'PATCH',
       body: disk,
@@ -106,12 +106,12 @@ class RenderApiService {
   }
 
   async deleteDisk(serviceId, diskId) {
-    if (!this.configured()) return this.configurationRequired('delete_disk');
+    this.assertConfigured('delete_disk');
     return this.request(`/services/${encodeURIComponent(serviceId)}/disks/${encodeURIComponent(diskId)}`, { method: 'DELETE' });
   }
 
   async addCustomDomain(serviceId, domainName) {
-    if (!this.configured()) return this.configurationRequired('add_custom_domain');
+    this.assertConfigured('add_custom_domain');
     return this.request(`/services/${encodeURIComponent(serviceId)}/custom-domains`, {
       method: 'POST',
       body: { name: domainName },
@@ -119,17 +119,17 @@ class RenderApiService {
   }
 
   async listCustomDomains(serviceId) {
-    if (!this.configured()) return this.configurationRequired('list_custom_domains');
+    this.assertConfigured('list_custom_domains');
     return this.request(`/services/${encodeURIComponent(serviceId)}/custom-domains?limit=100`);
   }
 
   async getCustomDomain(serviceId, domainId) {
-    if (!this.configured()) return this.configurationRequired('get_custom_domain');
+    this.assertConfigured('get_custom_domain');
     return this.request(`/services/${encodeURIComponent(serviceId)}/custom-domains/${encodeURIComponent(domainId)}`);
   }
 
   async deleteCustomDomain(serviceId, domainId) {
-    if (!this.configured()) return this.configurationRequired('delete_custom_domain');
+    this.assertConfigured('delete_custom_domain');
     return this.request(`/services/${encodeURIComponent(serviceId)}/custom-domains/${encodeURIComponent(domainId)}`, { method: 'DELETE' });
   }
 

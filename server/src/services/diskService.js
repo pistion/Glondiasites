@@ -2,56 +2,57 @@ import renderApiService from './renderApiService.js';
 import { makeId, mutateHostingStore, nowIso, readHostingStore } from './hostingStore.js';
 
 class DiskService {
-  async list(serviceId) {
+  async list(deploymentId) {
+    const deployment = await findDeployment(deploymentId);
     const store = await readHostingStore();
-    return store.disks[serviceId] || [];
+    return store.disks[deployment.deploymentId] || [];
   }
 
-  async attach(serviceId, input = {}) {
+  async attach(deploymentId, input = {}) {
     const disk = validateDisk(input);
-    const deployment = await findDeploymentByService(serviceId);
+    const deployment = await findDeployment(deploymentId);
     if (deployment.serviceType !== 'web_service') {
       const error = new Error('Persistent disks are supported only for Render web services in this flow.');
       error.status = 400;
       throw error;
     }
-    let renderDisk = null;
-    if (renderApiService.configured()) renderDisk = await renderApiService.createDisk(serviceId, disk);
+    const renderDisk = await renderApiService.createDisk(deployment.renderServiceId, disk);
     return mutateHostingStore((store) => {
       const item = {
         diskId: renderDisk?.disk?.id || renderDisk?.id || makeId('disk'),
         name: disk.name,
         mountPath: disk.mountPath,
         sizeGB: disk.sizeGB,
-        status: renderDisk ? 'attached' : 'pending_configuration',
+        status: 'attached',
         renderDisk,
         createdAt: nowIso(),
         updatedAt: nowIso(),
       };
-      store.disks[serviceId] = [item, ...(store.disks[serviceId] || [])];
-      updateDeploymentDisks(store, serviceId);
+      store.disks[deployment.deploymentId] = [item, ...(store.disks[deployment.deploymentId] || [])];
+      updateDeploymentDisks(store, deployment.deploymentId);
       return item;
     });
   }
 
-  async update(serviceId, diskId, input = {}) {
+  async update(deploymentId, diskId, input = {}) {
+    const deployment = await findDeployment(deploymentId);
     const disk = validateDisk(input, false);
-    let renderDisk = null;
-    if (renderApiService.configured()) renderDisk = await renderApiService.updateDisk(serviceId, diskId, disk);
+    const renderDisk = await renderApiService.updateDisk(deployment.renderServiceId, diskId, disk);
     return mutateHostingStore((store) => {
-      const item = (store.disks[serviceId] || []).find((row) => row.diskId === diskId);
+      const item = (store.disks[deployment.deploymentId] || []).find((row) => row.diskId === diskId);
       if (!item) throw notFound('Disk not found.');
       Object.assign(item, disk, { renderDisk, updatedAt: nowIso() });
-      updateDeploymentDisks(store, serviceId);
+      updateDeploymentDisks(store, deployment.deploymentId);
       return item;
     });
   }
 
-  async remove(serviceId, diskId) {
-    if (renderApiService.configured()) await renderApiService.deleteDisk(serviceId, diskId);
+  async remove(deploymentId, diskId) {
+    const deployment = await findDeployment(deploymentId);
+    await renderApiService.deleteDisk(deployment.renderServiceId, diskId);
     return mutateHostingStore((store) => {
-      store.disks[serviceId] = (store.disks[serviceId] || []).filter((row) => row.diskId !== diskId);
-      updateDeploymentDisks(store, serviceId);
+      store.disks[deployment.deploymentId] = (store.disks[deployment.deploymentId] || []).filter((row) => row.diskId !== diskId);
+      updateDeploymentDisks(store, deployment.deploymentId);
       return { deleted: true, diskId };
     });
   }
@@ -69,15 +70,16 @@ function validateDisk(input = {}, requireAll = true) {
   return { name, mountPath, sizeGB };
 }
 
-async function findDeploymentByService(serviceId) {
+async function findDeployment(deploymentId) {
   const store = await readHostingStore();
-  const deployment = store.deployments.find((item) => item.renderServiceId === serviceId || item.deploymentId === serviceId);
+  const deployment = store.deployments.find((item) => item.deploymentId === deploymentId || item.renderServiceId === deploymentId);
   if (!deployment) throw notFound('Hosting service not found.');
+  if (!deployment.renderServiceId) throw validationError('Render deployment has not started. A real Render service ID is required.');
   return deployment;
 }
 
 function updateDeploymentDisks(store, serviceId) {
-  const deployment = store.deployments.find((item) => item.renderServiceId === serviceId || item.deploymentId === serviceId);
+  const deployment = store.deployments.find((item) => item.deploymentId === serviceId);
   if (!deployment) return;
   deployment.diskMetadata = store.disks[serviceId] || [];
   deployment.updatedAt = nowIso();

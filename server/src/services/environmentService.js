@@ -3,64 +3,73 @@ import renderApiService from './renderApiService.js';
 import { mutateHostingStore, nowIso, redactEnvValue, readHostingStore } from './hostingStore.js';
 
 class EnvironmentService {
-  async list(serviceId) {
-    return (await this.listRaw(serviceId)).map(publicEnvVar);
+  async list(deploymentId) {
+    return (await this.listRaw(deploymentId)).map(publicEnvVar);
   }
 
-  async listRaw(serviceId) {
+  async listRaw(deploymentId) {
     const store = await readHostingStore();
-    return store.env[serviceId] || [];
+    return store.env[deploymentId] || [];
   }
 
-  async sync(serviceId) {
-    const rows = await this.listRaw(serviceId);
-    if (renderApiService.configured()) {
-      const envVars = rows.map((item) => ({ key: item.key, value: readStoredValue(item) }));
-      await renderApiService.upsertEnvVars(serviceId, envVars);
-    }
+  async sync(deploymentId) {
+    const deployment = await resolveDeployment(deploymentId);
+    const rows = await this.listRaw(deployment.deploymentId);
+    const envVars = rows.map((item) => ({ key: item.key, value: readStoredValue(item) }));
+    await renderApiService.upsertEnvVars(deployment.renderServiceId, envVars);
     return mutateHostingStore((store) => {
-      const nextRows = (store.env[serviceId] || []).map((item) => ({
+      const nextRows = (store.env[deployment.deploymentId] || []).map((item) => ({
         ...item,
         renderSynced: true,
         requiresRedeploy: true,
         updatedAt: nowIso(),
       }));
-      store.env[serviceId] = nextRows;
-      updateDeploymentEnv(store, serviceId, nextRows);
+      store.env[deployment.deploymentId] = nextRows;
+      updateDeploymentEnv(store, deployment.deploymentId, nextRows);
       return { synced: nextRows.length, requiresRedeploy: nextRows.some((item) => item.requiresRedeploy) };
     });
   }
 
-  async upsert(serviceId, input = {}) {
+  async upsert(deploymentId, input = {}) {
+    const deployment = await resolveDeployment(deploymentId);
     const envVar = validateEnvVar(input);
-    let renderResult = null;
-    if (renderApiService.configured()) {
-      renderResult = await renderApiService.upsertEnvVars(serviceId, [envVar]);
-    }
     return mutateHostingStore((store) => {
-      const rows = store.env[serviceId] || [];
+      const rows = store.env[deployment.deploymentId] || [];
       const existing = rows.find((item) => item.key === envVar.key);
-      const metadata = toMetadata(envVar, renderResult);
+      const metadata = toMetadata(envVar, null);
       if (existing) Object.assign(existing, metadata);
       else rows.unshift(metadata);
-      store.env[serviceId] = rows;
-      updateDeploymentEnv(store, serviceId, rows);
+      store.env[deployment.deploymentId] = rows;
+      updateDeploymentEnv(store, deployment.deploymentId, rows);
       return publicEnvVar(existing || metadata);
     });
   }
 
-  async patch(serviceId, key, input = {}) {
-    return this.upsert(serviceId, { ...input, key });
+  async patch(deploymentId, key, input = {}) {
+    return this.upsert(deploymentId, { ...input, key });
   }
 
-  async remove(serviceId, key) {
-    if (renderApiService.configured()) await renderApiService.deleteEnvVar(serviceId, key);
+  async remove(deploymentId, key) {
+    const deployment = await resolveDeployment(deploymentId);
+    await renderApiService.deleteEnvVar(deployment.renderServiceId, key);
     return mutateHostingStore((store) => {
-      store.env[serviceId] = (store.env[serviceId] || []).filter((item) => item.key !== key);
-      updateDeploymentEnv(store, serviceId, store.env[serviceId]);
+      store.env[deployment.deploymentId] = (store.env[deployment.deploymentId] || []).filter((item) => item.key !== key);
+      updateDeploymentEnv(store, deployment.deploymentId, store.env[deployment.deploymentId]);
       return { deleted: true, key };
     });
   }
+}
+
+async function resolveDeployment(deploymentId) {
+  const store = await readHostingStore();
+  const deployment = store.deployments.find((item) => item.deploymentId === deploymentId || item.renderServiceId === deploymentId);
+  if (!deployment) throw notFound('Hosting deployment not found.');
+  if (!deployment.renderServiceId) {
+    const error = new Error('Render deployment has not started. A real Render service ID is required.');
+    error.status = 409;
+    throw error;
+  }
+  return deployment;
 }
 
 function validateEnvVar(input = {}) {
@@ -122,7 +131,7 @@ function readStoredValue(item = {}) {
 }
 
 function updateDeploymentEnv(store, serviceId, rows) {
-  const deployment = store.deployments.find((item) => item.renderServiceId === serviceId || item.deploymentId === serviceId);
+  const deployment = store.deployments.find((item) => item.deploymentId === serviceId);
   if (!deployment) return;
   deployment.environmentVariablesMetadata = rows.map(publicEnvVar);
   deployment.updatedAt = nowIso();
@@ -131,6 +140,12 @@ function updateDeploymentEnv(store, serviceId, rows) {
 function publicEnvVar(item = {}) {
   const { valueCiphertext, valuePlaintext, ...safe } = item;
   return safe;
+}
+
+function notFound(message) {
+  const error = new Error(message);
+  error.status = 404;
+  return error;
 }
 
 export default new EnvironmentService();

@@ -11,6 +11,8 @@ import {
   getRenderDeploymentLogs,
   getRenderDeploymentStatus,
   listHostingDeployments,
+  listHostingDomains,
+  listHostingEnvVars,
   redeployRenderDeployment,
   suspendHostingDeployment,
   syncHostingEnvVars,

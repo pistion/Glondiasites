@@ -23,5 +23,13 @@ services:
         value: production
       - key: VITE_APP_MODE
         value: live
+      - key: VITE_API_BASE_URL
+        value: /api
       - key: DATA_DIR
         value: /var/glondia/data
+      - key: RENDER_API_KEY
+        sync: false
+      - key: RENDER_OWNER_ID
+        sync: false
+      - key: RENDER_SERVICE_ID
+        sync: false
