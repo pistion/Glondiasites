@@ -4,10 +4,9 @@ import { ICN } from './icons';
 import { GD, TEMPLATES_REPO } from './data';
 import { Badge, Tabs, ToggleRow, Empty } from './components';
 import { useTemplates } from './use-templates';
-import { useSites } from './use-sites';
 import { useDomains } from './use-domains';
 import {
-  createBuilderSite, updateBuilderSite, archiveBuilderSite,
+  createBuilderSite, updateBuilderSite,
   saveBuilderPage, publishBuilderSite,
   createBuilderPage, deleteBuilderPage, listPageVersions,
   getBuilderSite,
@@ -214,17 +213,6 @@ function TplThumb({ tpl }) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function BuilderGallery({ navigate }) {
-  const { sites, loading: sitesLoading, source: sitesSource } = useSites();
-  const [archivingId, setArchivingId] = useStateB(null);
-  const [archiveError, setArchiveError] = useStateB('');
-
-  const handleArchive = async (siteId, e) => {
-    e.stopPropagation();
-    setArchivingId(siteId);
-    setArchiveError('');
-    try { await archiveBuilderSite(siteId); } catch (error) { setArchiveError(error.message || 'Could not delete the hosted site on Render.'); } finally { setArchivingId(null); }
-  };
-
   return (
     <>
       <div className="page-head">
@@ -234,7 +222,6 @@ export function BuilderGallery({ navigate }) {
           <p className="sub">
             Start with RoxanneAI, pick a Glondia template, or bring in an existing project from GitHub or an upload.
           </p>
-          {archiveError && <div className="form-error" style={{ marginTop: 10 }}>{archiveError}</div>}
         </div>
       </div>
 
@@ -283,68 +270,6 @@ export function BuilderGallery({ navigate }) {
         </button>
       </div>
 
-      {/* ── My sites ─────────────────────────────────────────────────────── */}
-      {sitesSource === "api" && (
-        <>
-          <div className="row between" style={{ marginTop: 8 }}>
-            <h2 style={{ margin: 0 }}>My sites</h2>
-            <Badge tone="success" dot={false}>API</Badge>
-          </div>
-
-          {sitesLoading ? (
-            <div className="card" style={{ padding: "32px 24px" }}>
-              <Empty icon="Layers" title="Loading your sites…" />
-            </div>
-          ) : sites.length === 0 ? (
-            <div className="card" style={{ padding: "32px 24px" }}>
-              <Empty icon="Layers" title="No sites yet"
-                body="Create your first site using a template, RoxanneAI, or by importing from Git." />
-            </div>
-          ) : (
-            <div className="grid-2">
-              {sites.map(site => {
-                const isPublished = site.status === 'published';
-                const url = `https://${site.slug}.glondia.app`;
-                return (
-                  <div key={site.id} className="card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                    <div className="row between">
-                      <div>
-                        <div style={{ fontWeight: 600 }}>{site.name}</div>
-                        <div className="mono faint" style={{ fontSize: 12, marginTop: 2 }}>{site.slug}.glondia.app</div>
-                      </div>
-                      <Badge tone={isPublished ? "success" : "warn"} dot={false}>
-                        {isPublished ? "Live" : site.status || "Draft"}
-                      </Badge>
-                    </div>
-                    <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
-                      {site.pages?.length ?? 0} page{(site.pages?.length ?? 0) !== 1 ? "s" : ""} ·{" "}
-                      {site.updatedAt ? new Date(site.updatedAt).toLocaleDateString() : "—"}
-                    </div>
-                    <div className="row" style={{ gap: 8 }}>
-                      {site.templateId && (
-                        <button className="btn btn-sm btn-primary" style={{ flex: 1 }}
-                          onClick={() => navigate({ view: "builder-editor", params: { id: site.templateId, siteId: site.id } })}>
-                          <ICN.Edit size={13} /> Resume
-                        </button>
-                      )}
-                      {isPublished && (
-                        <a href={url} target="_blank" rel="noopener noreferrer" className="btn btn-sm btn-outline">
-                          <ICN.ExternalLink size={13} /> Visit
-                        </a>
-                      )}
-                      <button className="btn btn-sm btn-ghost" style={{ color: "var(--danger)" }}
-                        onClick={(e) => handleArchive(site.id, e)}
-                        disabled={archivingId === site.id}>
-                        <ICN.Trash size={13} />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </>
-      )}
     </>
   );
 }
