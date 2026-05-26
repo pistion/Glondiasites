@@ -507,11 +507,22 @@ function formatTime(value) {
 
 // ── Billing Tab ───────────────────────────────────────────────────────────────
 
+const BSP_BANK_DETAILS = {
+  bank: 'BSP (Bank of South Pacific)',
+  accountName: 'Glondia Analysts & Consultancy',
+  accountHolder: 'John Wesly Tawa',
+  branch: 'Waigani',
+  accountNumber: '0000242010',
+  proofEmail: 'johnweslytawa@gmail.com',
+};
+
 function BillingTab({ deploymentId }) {
   const [billing, setBilling] = useState(null);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState('');
+  const [payMethod, setPayMethod] = useState('paypal'); // 'paypal' | 'bsp'
   const [paypalError, setPaypalError] = useState('');
+  const [showBspModal, setShowBspModal] = useState(false);
 
   const load = () => {
     setFetchError('');
@@ -548,42 +559,215 @@ function BillingTab({ deploymentId }) {
   const hoursLeft = billing?.hoursRemaining ?? null;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div className="card" style={{ borderColor: overdue ? 'var(--danger)' : 'var(--warning)', borderWidth: 1.5 }}>
-        <div className="row" style={{ gap: 10, color: overdue ? 'var(--danger)' : 'var(--warning)', marginBottom: 12, fontWeight: 700, fontSize: 15 }}>
-          <ICN.AlertCircle size={17} />
-          {overdue
-            ? 'Site suspended — payment overdue'
-            : `Pay to keep your site live · ${hoursLeft > 0 ? `${hoursLeft}h remaining` : 'due now'}`}
-        </div>
+    <>
+      {showBspModal && <BspTransferModal onClose={() => setShowBspModal(false)} />}
 
-        <p className="muted" style={{ margin: '0 0 18px', fontSize: 13 }}>
-          {overdue
-            ? 'Your Render service was suspended because no payment was received within 24 hours of deployment. Complete payment below to restore it.'
-            : `Your site will be automatically suspended if payment is not received within 24 hours of deployment. ${hoursLeft > 0 ? `You have ${hoursLeft} hour${hoursLeft === 1 ? '' : 's'} left.` : 'Pay now to avoid interruption.'}`}
-        </p>
-
-        <div className="kv" style={{ gridTemplateColumns: '160px 1fr', marginBottom: 18 }}>
-          <dt>Deployed at</dt><dd>{billing?.deployedAt ? new Date(billing.deployedAt).toLocaleString() : '—'}</dd>
-          <dt>Payment deadline</dt><dd>{billing?.deadlineAt ? new Date(billing.deadlineAt).toLocaleString() : '—'}</dd>
-          <dt>Grace period</dt><dd>{billing?.graceHours || 24} hours</dd>
-        </div>
-
-        {paypalError && (
-          <div style={{ color: 'var(--danger)', fontSize: 13, marginBottom: 12, padding: '8px 12px', background: 'var(--bg-deep)', borderRadius: 'var(--r-sm)', border: '1px solid var(--danger)' }}>
-            <ICN.AlertCircle size={13} style={{ marginRight: 6, verticalAlign: 'middle' }} />
-            {paypalError}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {/* Status banner */}
+        <div className="card" style={{ borderColor: overdue ? 'var(--danger)' : 'var(--warning)', borderWidth: 1.5 }}>
+          <div className="row" style={{ gap: 10, color: overdue ? 'var(--danger)' : 'var(--warning)', marginBottom: 12, fontWeight: 700, fontSize: 15 }}>
+            <ICN.AlertCircle size={17} />
+            {overdue
+              ? 'Site suspended — payment overdue'
+              : `Pay to keep your site live · ${hoursLeft > 0 ? `${hoursLeft}h remaining` : 'due now'}`}
           </div>
-        )}
+          <p className="muted" style={{ margin: '0 0 14px', fontSize: 13 }}>
+            {overdue
+              ? 'Your Render service was suspended because no payment was received within 24 hours of deployment. Complete payment below to restore it.'
+              : `Your site will be automatically suspended if payment is not received within 24 hours of deployment. ${hoursLeft > 0 ? `You have ${hoursLeft} hour${hoursLeft === 1 ? '' : 's'} left.` : 'Pay now to avoid interruption.'}`}
+          </p>
+          <div className="kv" style={{ gridTemplateColumns: '160px 1fr' }}>
+            <dt>Deployed at</dt><dd>{billing?.deployedAt ? new Date(billing.deployedAt).toLocaleString() : '—'}</dd>
+            <dt>Payment deadline</dt><dd>{billing?.deadlineAt ? new Date(billing.deadlineAt).toLocaleString() : '—'}</dd>
+            <dt>Grace period</dt><dd>{billing?.graceHours || 24} hours</dd>
+          </div>
+        </div>
 
-        <HostingPayPalButton
-          deploymentId={deploymentId}
-          onPaid={() => { setPaypalError(''); load(); }}
-          onError={(msg) => setPaypalError(msg)}
-        />
+        {/* Payment method selector */}
+        <div className="card">
+          <h3 style={{ margin: '0 0 14px', fontSize: 14, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)' }}>Choose payment method</h3>
+          <div className="row" style={{ gap: 10, marginBottom: 20 }}>
+            <BillingPayPill
+              active={payMethod === 'paypal'}
+              onClick={() => { setPayMethod('paypal'); setPaypalError(''); }}
+              icon="CreditCard"
+              label="PayPal"
+              sub="Pay online instantly"
+            />
+            <BillingPayPill
+              active={payMethod === 'bsp'}
+              onClick={() => setPayMethod('bsp')}
+              icon="Layers"
+              label="BSP Bank Transfer"
+              sub="Mobile / internet banking"
+            />
+          </div>
+
+          {/* PayPal */}
+          {payMethod === 'paypal' && (
+            <>
+              {paypalError && (
+                <div style={{ color: 'var(--danger)', fontSize: 13, marginBottom: 12, padding: '8px 12px', background: 'var(--bg-deep)', borderRadius: 'var(--r-sm)', border: '1px solid var(--danger)' }}>
+                  <ICN.AlertCircle size={13} style={{ marginRight: 6, verticalAlign: 'middle' }} />
+                  {paypalError}
+                </div>
+              )}
+              <HostingPayPalButton
+                deploymentId={deploymentId}
+                onPaid={() => { setPaypalError(''); load(); }}
+                onError={(msg) => setPaypalError(msg)}
+              />
+            </>
+          )}
+
+          {/* BSP Manual Transfer */}
+          {payMethod === 'bsp' && (
+            <div>
+              <p className="muted" style={{ fontSize: 13, margin: '0 0 14px' }}>
+                Transfer the hosting amount to our BSP account. Once sent, email us your proof of payment and we'll activate your site within 3 hours on the next business day.
+              </p>
+              <button
+                className="btn btn-primary"
+                style={{ width: '100%', justifyContent: 'center', fontSize: 14, padding: '11px 0' }}
+                onClick={() => setShowBspModal(true)}
+              >
+                <ICN.Layers size={15} /> View BSP Bank Account Details
+              </button>
+            </div>
+          )}
+        </div>
+
+        {fetchError && <div style={{ color: 'var(--danger)', fontSize: 13 }}>{fetchError}</div>}
       </div>
+    </>
+  );
+}
 
-      {fetchError && <div style={{ color: 'var(--danger)', fontSize: 13 }}>{fetchError}</div>}
+function BillingPayPill({ active, onClick, icon, label, sub }) {
+  const Icon = ICN[icon];
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'flex-start',
+        gap: 4,
+        padding: '12px 14px',
+        borderRadius: 'var(--r-sm)',
+        border: `1.5px solid ${active ? 'var(--accent)' : 'var(--border-strong)'}`,
+        background: active ? 'var(--accent-soft)' : 'var(--bg-elev)',
+        color: active ? 'var(--accent-ink)' : 'var(--text)',
+        cursor: 'pointer',
+        textAlign: 'left',
+      }}
+    >
+      <div className="row" style={{ gap: 7, fontWeight: 600, fontSize: 13.5 }}>
+        <Icon size={15} /> {label}
+      </div>
+      <div style={{ fontSize: 11.5, color: active ? 'var(--accent-ink)' : 'var(--text-muted)', opacity: 0.85 }}>{sub}</div>
+    </button>
+  );
+}
+
+function BspTransferModal({ onClose }) {
+  const [copied, setCopied] = useState('');
+
+  const copy = (text, field) => {
+    navigator.clipboard?.writeText(text).then(() => {
+      setCopied(field);
+      setTimeout(() => setCopied(''), 2000);
+    });
+  };
+
+  const row = (label, value, copyKey) => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
+      <div>
+        <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 2 }}>{label}</div>
+        <div style={{ fontWeight: 600, fontSize: 14, fontFamily: copyKey === 'account' ? 'var(--mono, monospace)' : 'inherit' }}>{value}</div>
+      </div>
+      {copyKey && (
+        <button
+          className="btn btn-sm btn-outline"
+          onClick={() => copy(value, copyKey)}
+          style={{ flexShrink: 0, marginLeft: 12 }}
+        >
+          {copied === copyKey ? <><ICN.Check size={12} /> Copied</> : <><ICN.Copy size={12} /> Copy</>}
+        </button>
+      )}
+    </div>
+  );
+
+  return (
+    <div
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1000,
+        background: 'rgba(0,0,0,0.55)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 16,
+      }}
+    >
+      <div style={{
+        background: 'var(--bg-card)',
+        borderRadius: 'var(--r)',
+        boxShadow: '0 24px 60px rgba(0,0,0,0.35)',
+        width: '100%',
+        maxWidth: 480,
+        overflow: 'hidden',
+      }}>
+        {/* Header */}
+        <div style={{ padding: '20px 24px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <div className="page-eyebrow" style={{ marginBottom: 4 }}>Manual Bank Transfer</div>
+            <h2 style={{ margin: 0, fontSize: 20 }}>BSP Bank Details</h2>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 0, cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}>
+            <ICN.X size={20} />
+          </button>
+        </div>
+
+        {/* Account details */}
+        <div style={{ padding: '16px 24px' }}>
+          {row('Bank', BSP_BANK_DETAILS.bank)}
+          {row('Account Name', BSP_BANK_DETAILS.accountName)}
+          {row('Account Holder', BSP_BANK_DETAILS.accountHolder)}
+          {row('Branch', BSP_BANK_DETAILS.branch)}
+          {row('Account Number', BSP_BANK_DETAILS.accountNumber, 'account')}
+        </div>
+
+        {/* Instructions */}
+        <div style={{ margin: '0 24px 20px', padding: '14px 16px', background: 'var(--bg-deep)', borderRadius: 'var(--r-sm)', border: '1px solid var(--border)' }}>
+          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <ICN.Mail size={14} /> After transferring, send proof of payment to:
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+            <span style={{ fontFamily: 'var(--mono, monospace)', fontSize: 13, wordBreak: 'break-all' }}>
+              {BSP_BANK_DETAILS.proofEmail}
+            </span>
+            <button className="btn btn-sm btn-outline" onClick={() => copy(BSP_BANK_DETAILS.proofEmail, 'email')} style={{ flexShrink: 0 }}>
+              {copied === 'email' ? <><ICN.Check size={12} /> Copied</> : <><ICN.Copy size={12} /> Copy</>}
+            </button>
+          </div>
+        </div>
+
+        {/* Processing notice */}
+        <div style={{ margin: '0 24px 24px', padding: '12px 16px', background: 'var(--accent-soft)', borderRadius: 'var(--r-sm)', border: '1px solid var(--accent)', color: 'var(--accent-ink)' }}>
+          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>Processing time</div>
+          <div style={{ fontSize: 12.5, lineHeight: 1.5 }}>
+            Payment will be processed in <strong>less than 3 hours</strong> after proof is received.<br />
+            Business hours: <strong>8:00 AM – 4:00 PM, Monday to Friday</strong> (PNG time).<br />
+            Transfers received outside business hours will be processed the next business day.
+          </div>
+        </div>
+
+        <div style={{ padding: '0 24px 24px' }}>
+          <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }} onClick={onClose}>
+            Got it — I'll send the receipt
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
