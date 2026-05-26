@@ -201,6 +201,12 @@ export async function getRenderDeploymentLogs(deploymentId) {
   return hostingRequest(`/deployments/${deploymentId}/logs`);
 }
 
+// Returns an EventSource URL for the live log stream (SSE).
+// Use with: new EventSource(getDeploymentLogStreamUrl(deploymentId))
+export function getDeploymentLogStreamUrl(deploymentId) {
+  return liveApiUrl(`/deployments/${encodeURIComponent(deploymentId)}/logs/stream`);
+}
+
 export async function listHostingDeployments() {
   return hostingRequest('/hosting');
 }

@@ -9,10 +9,10 @@ import {
   deleteHostingDeployment,
   deleteHostingDomain,
   deleteHostingEnvVar,
+  getDeploymentLogStreamUrl,
   getHostingPaymentStatus,
   getHostingService,
   getPayPalClientSettings,
-  getRenderDeploymentLogs,
   getRenderDeploymentStatus,
   listHostingDeployments,
   listHostingDomains,
@@ -121,21 +121,18 @@ export function HostingDetail({ id, navigate }) {
   const deploymentId = id;
   const [app, setApp] = useState(null);
   const [status, setStatus] = useState(null);
-  const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [tab, setTab] = useState('Overview');
 
   const load = async () => {
-    const [hosting, nextStatus, nextLogs] = await Promise.all([
+    const [hosting, nextStatus] = await Promise.all([
       getHostingService(deploymentId),
       getRenderDeploymentStatus(deploymentId).catch(() => null),
-      getRenderDeploymentLogs(deploymentId).catch(() => []),
     ]);
     setApp(hosting);
     setStatus(nextStatus);
-    setLogs(nextLogs || []);
   };
 
   useEffect(() => {
@@ -195,7 +192,7 @@ export function HostingDetail({ id, navigate }) {
       {error && <div className="card" style={{ padding: '10px 14px', color: 'var(--danger)', fontSize: 13 }}>{error}</div>}
 
       <div className="grid-side">
-        <DeploymentStatusPanel app={merged} logs={logs} isLive={isLive} isFailed={isFailed} isUnverified={isUnverified} onVerify={() => runAction('verify', () => verifyRenderDeploymentUrl(deploymentId))} busy={busy} />
+        <DeploymentStatusPanel app={merged} isLive={isLive} isFailed={isFailed} isUnverified={isUnverified} onVerify={() => runAction('verify', () => verifyRenderDeploymentUrl(deploymentId))} busy={busy} />
         <AdminPanel
           app={merged}
           busy={busy}
@@ -209,18 +206,18 @@ export function HostingDetail({ id, navigate }) {
 
       <Tabs value={tab} onChange={setTab} options={['Overview', 'Billing', 'Environment Variables', 'Persistent Disk', 'Domains', 'Build Logs', 'Render Settings']} />
 
-      {tab === 'Overview' && <OverviewTab app={merged} logs={logs} />}
+      {tab === 'Overview' && <OverviewTab app={merged} deploymentId={deploymentId} />}
       {tab === 'Billing' && <BillingTab deploymentId={deploymentId} />}
       {tab === 'Environment Variables' && <EnvironmentTab deploymentId={deploymentId} onChanged={load} />}
       {tab === 'Persistent Disk' && <DiskTab deploymentId={deploymentId} app={merged} onChanged={load} />}
       {tab === 'Domains' && <DomainsTab deploymentId={deploymentId} onChanged={load} />}
-      {tab === 'Build Logs' && <LogsPanel logs={logs} />}
+      {tab === 'Build Logs' && <LiveLogsPanel deploymentId={deploymentId} />}
       {tab === 'Render Settings' && <RenderSettingsTab app={merged} />}
     </>
   );
 }
 
-function DeploymentStatusPanel({ app, logs, isLive, isFailed, isUnverified, onVerify, busy }) {
+function DeploymentStatusPanel({ app, isLive, isFailed, isUnverified, onVerify, busy }) {
   const hasRenderService = Boolean(app.renderServiceId);
   const shouldAnimate = hasRenderService && ['preparing', 'queued', 'building', 'deploying', 'verifying'].includes(app.status);
   return (
@@ -249,8 +246,8 @@ function DeploymentStatusPanel({ app, logs, isLive, isFailed, isUnverified, onVe
         </button>
       )}
       <div style={{ marginTop: 16 }}>
-        <div className="label">Recent logs</div>
-        <MiniLogs logs={logs.slice(0, 4)} />
+        <div className="label" style={{ marginBottom: 6 }}>Recent activity</div>
+        <div className="muted" style={{ fontSize: 12 }}>Open the <strong>Build Logs</strong> tab for the live log stream.</div>
       </div>
     </div>
   );
@@ -321,7 +318,7 @@ function AdminPanel({ app, busy, onSuspend, onDelete }) {
   );
 }
 
-function OverviewTab({ app, logs }) {
+function OverviewTab({ app, deploymentId }) {
   return (
     <div className="grid-side">
       <div className="card">
@@ -333,7 +330,7 @@ function OverviewTab({ app, logs }) {
           <dt>Live URL</dt><dd className="mono">{app.liveUrl || 'Pending'}</dd>
         </div>
       </div>
-      <LogsPanel logs={logs.slice(0, 8)} />
+      <LiveLogsPanel deploymentId={deploymentId} compact />
     </div>
   );
 }
@@ -457,16 +454,114 @@ function RenderSettingsTab({ app }) {
   );
 }
 
-function LogsPanel({ logs }) {
-  return <div className="card"><h2 style={{ marginTop: 0 }}>Deployment logs</h2><MiniLogs logs={logs} /></div>;
-}
+// ── Live log stream panel ─────────────────────────────────────────────────────
 
-function MiniLogs({ logs }) {
+function LiveLogsPanel({ deploymentId, compact = false }) {
+  const [lines, setLines] = useState([]);
+  const [streamStatus, setStreamStatus] = useState(null);
+  const [connState, setConnState] = useState('connecting'); // connecting | live | ended | error
+  const [connError, setConnError] = useState('');
+  const bottomRef = useRef(null);
+  const seenIds = useRef(new Set());
+
+  useEffect(() => {
+    setLines([]);
+    seenIds.current = new Set();
+    setConnState('connecting');
+    setConnError('');
+
+    const url = getDeploymentLogStreamUrl(deploymentId);
+    const es = new EventSource(url);
+
+    es.addEventListener('open', () => setConnState('live'));
+
+    es.addEventListener('log', (e) => {
+      try {
+        const log = JSON.parse(e.data);
+        const key = log.id || `${log.source}:${log.timestamp}:${log.message}`;
+        if (seenIds.current.has(key)) return;
+        seenIds.current.add(key);
+        setLines((prev) => [...prev, log]);
+      } catch { /* ignore */ }
+    });
+
+    es.addEventListener('status', (e) => {
+      try { setStreamStatus(JSON.parse(e.data)); } catch { /* ignore */ }
+    });
+
+    es.addEventListener('done', () => { setConnState('ended'); es.close(); });
+
+    es.addEventListener('error', () => {
+      setConnState((prev) => prev === 'ended' ? 'ended' : 'error');
+      setConnError('Stream disconnected — showing logs received so far.');
+      es.close();
+    });
+
+    return () => es.close();
+  }, [deploymentId]);
+
+  // Auto-scroll to newest line (full panel only)
+  useEffect(() => {
+    if (!compact) bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [lines.length, compact]);
+
+  const maxH = compact ? 200 : 520;
+
   return (
-    <div className="term" style={{ maxHeight: 280 }}>
-      {(logs || []).length === 0 ? <div><span className="dim">No logs yet.</span></div> : logs.map((log) => (
-        <div key={log.id || `${log.timestamp}-${log.message}`}><span className="ts">{formatTime(log.createdAt || log.timestamp)}</span> <span className={log.level === 'error' ? 'err' : log.level === 'warn' ? 'dim' : 'info'}>{log.message || log.msg}</span></div>
-      ))}
+    <div className="card">
+      <div className="row between" style={{ marginBottom: 10 }}>
+        <h2 style={{ margin: 0, fontSize: compact ? 14 : 18 }}>
+          {compact ? 'Live logs' : 'Build Logs'}
+        </h2>
+        <div className="row" style={{ gap: 8 }}>
+          {connState === 'connecting' && <Badge tone="muted" dot>Connecting…</Badge>}
+          {connState === 'live' && <Badge tone="success" dot>Live</Badge>}
+          {connState === 'ended' && <Badge tone="info" dot={false}>Stream ended</Badge>}
+          {connState === 'error' && <Badge tone="danger" dot={false}>Disconnected</Badge>}
+        </div>
+      </div>
+
+      {streamStatus && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+          <Badge tone={streamStatus.status === 'live' ? 'success' : streamStatus.status === 'failed' ? 'danger' : 'muted'} dot={false}>
+            {streamStatus.currentStep || streamStatus.status || 'Preparing'}
+          </Badge>
+          {streamStatus.liveUrl && (
+            <a href={streamStatus.liveUrl} target="_blank" rel="noopener noreferrer"
+              className="badge info" style={{ textDecoration: 'none', fontSize: 11.5 }}>
+              {streamStatus.liveUrl.replace(/^https?:\/\//, '')} ↗
+            </a>
+          )}
+        </div>
+      )}
+
+      {streamStatus?.errorMessage && (
+        <div style={{ color: 'var(--danger)', fontSize: 12.5, marginBottom: 10, padding: '7px 10px', background: 'var(--bg-deep)', borderRadius: 'var(--r-sm)', border: '1px solid var(--danger)' }}>
+          <ICN.AlertCircle size={12} style={{ marginRight: 5, verticalAlign: 'middle' }} />
+          {streamStatus.errorMessage}
+        </div>
+      )}
+
+      <div className="term" style={{ maxHeight: maxH, overflowY: 'auto' }}>
+        {lines.length === 0 && connState === 'connecting' && (
+          <div><span className="dim">Connecting to log stream…</span></div>
+        )}
+        {lines.length === 0 && connState !== 'connecting' && (
+          <div><span className="dim">No log lines yet. Render may still be queuing the build.</span></div>
+        )}
+        {lines.map((log, i) => (
+          <div key={log.id || i} style={{ display: 'flex', gap: 8, lineHeight: 1.5 }}>
+            <span className="ts" style={{ flexShrink: 0 }}>{formatTime(log.timestamp || log.createdAt)}</span>
+            <span className="dim" style={{ flexShrink: 0 }}>[{log.source === 'render' ? 'render' : 'sys'}]</span>
+            <span className={log.level === 'error' ? 'err' : log.level === 'warn' ? 'warn' : log.source === 'render' ? '' : 'dim'}>
+              {log.message || log.msg}
+            </span>
+          </div>
+        ))}
+        <div ref={bottomRef} />
+      </div>
+
+      {connError && <p style={{ color: 'var(--danger)', fontSize: 12, marginTop: 8 }}>{connError}</p>}
     </div>
   );
 }

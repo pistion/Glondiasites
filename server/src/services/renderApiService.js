@@ -63,6 +63,17 @@ class RenderApiService {
     return this.request(`/services/${encodeURIComponent(serviceId)}/deploys?limit=${encodeURIComponent(limit)}`);
   }
 
+  // Fetch deploy log lines. Returns { logs: [{ id, message, timestamp, type }] }
+  // cursor is the id of the last log line seen; pass it to get only new lines.
+  async getDeployLogs(serviceId, deployId, cursor = null) {
+    this.assertConfigured('get_deploy_logs');
+    const params = new URLSearchParams({ limit: '200' });
+    if (cursor) params.set('cursor', cursor);
+    return this.request(
+      `/services/${encodeURIComponent(serviceId)}/deploys/${encodeURIComponent(deployId)}/logs?${params}`
+    );
+  }
+
   async listEnvVars(serviceId) {
     this.assertConfigured('list_env_vars');
     return this.request(`/services/${encodeURIComponent(serviceId)}/env-vars?limit=100`);
