@@ -151,16 +151,15 @@ export default function App() {
   ]);
 
   // Render
+  const isAuthBlocked = DASHBOARD_VIEWS.has(route.view) && !authed;
+
   const renderView = () => {
-    // Auth guard — redirect unauthenticated users trying to reach dashboard views
-    if (DASHBOARD_VIEWS.has(route.view) && !authed) {
-      return <LoginPage navigate={navigate} />;
-    }
+    if (isAuthBlocked) return <LoginPage navigate={navigate} />;
 
     switch (route.view) {
       case "marketing":         return <Marketing navigate={navigate} />;
-      case "login":             return <LoginPage navigate={navigate} />;
-      case "signup":            return <SignupPage navigate={navigate} />;
+      case "login":             return authed ? (() => { navigate({ view: 'overview' }); return null; })() : <LoginPage navigate={navigate} />;
+      case "signup":            return authed ? (() => { navigate({ view: 'overview' }); return null; })() : <SignupPage navigate={navigate} />;
       case "overview":          return <Overview navigate={navigate} />;
       case "hosting-list":      return <HostingList navigate={navigate} />;
       case "hosting-detail":    return <HostingDetail id={route.params?.id} navigate={navigate} />;
@@ -215,7 +214,7 @@ export default function App() {
     }
   })();
 
-  const isFullPageView = route.view === "marketing" || route.view === "login" || route.view === "signup";
+  const isFullPageView = route.view === "marketing" || route.view === "login" || route.view === "signup" || isAuthBlocked;
 
   return (
     <>
