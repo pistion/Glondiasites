@@ -143,7 +143,8 @@ export function makeSession(input = {}) {
 // ─── Internals ────────────────────────────────────────────────────────────────
 
 function liveApiBase() {
-  return String(import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '') || '';
+  const base = String(import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
+  return base || '/api';
 }
 
 async function authPost(path, body) {
