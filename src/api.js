@@ -597,3 +597,15 @@ export async function uploadBuilderSitePackage(file) {
 export async function importBuilderSiteFromGithub(input) {
   return builderApi.importBuilderSiteFromGithub(input);
 }
+
+/**
+ * AI-powered page editor — sends the current HTML and a plain-English instruction
+ * to GPT-4o and returns the updated HTML + a summary of what changed.
+ * Requires OPENAI_API_KEY set on the backend.
+ */
+export async function aiEditBuilderPage(html, prompt, pagePath = '/') {
+  return liveApiRequest('/builder/ai/edit', {
+    method: 'POST',
+    body: { html, prompt, path: pagePath },
+  });
+}

@@ -1,4 +1,6 @@
 import { PrismaClient } from '@prisma/client';
+import fs from 'fs';
+import path from 'path';
 
 const prisma = new PrismaClient();
 
@@ -189,16 +191,39 @@ const billingPlans = [
   }
 ];
 
+// Load multi-page HTML templates from pre-built JSON files
+function loadHtmlTemplate(name: string) {
+  const filePath = path.join(__dirname, '..', 'src', 'templates', `${name}-template.json`);
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch {
+    console.warn(`Warning: could not load ${filePath} — using empty template.`);
+    return { _source: 'html-template', pages: [] };
+  }
+}
+
 const templateSeeds = [
-  { name: 'Portfolio',      category: 'Portfolio',    sortOrder: 1,  contentJson: { motif: 'monogram',  accent: '#1a1f1d', surface: '#f9f7f4', tagline: 'Show your work. Land the client.'           } },
-  { name: 'Small Business', category: 'Business',     sortOrder: 2,  contentJson: { motif: 'stripes',   accent: '#1d4e6e', surface: '#f0f4f7', tagline: 'From quote to booking in minutes.'          } },
-  { name: 'Restaurant',     category: 'Food & Drink', sortOrder: 3,  contentJson: { motif: 'menu',      accent: '#7c2d12', surface: '#fdf6ee', tagline: 'A menu worth sitting down for.'             } },
-  { name: 'Photography',    category: 'Creative',     sortOrder: 4,  contentJson: { motif: 'grid',      accent: '#1a1f1d', surface: '#0a0a0a', tagline: 'Full-bleed images, nothing in the way.'    } },
-  { name: 'Agency',         category: 'Business',     sortOrder: 5,  contentJson: { motif: 'blocks',    accent: '#2a4d9a', surface: '#f4f6fb', tagline: 'Case studies that close deals.'             } },
-  { name: 'Blog',           category: 'Publishing',   sortOrder: 6,  contentJson: { motif: 'lines',     accent: '#198754', surface: '#fafafa', tagline: 'Long-form writing with room to breathe.'   } },
-  { name: 'SaaS',           category: 'Technology',   sortOrder: 7,  contentJson: { motif: 'gradient',  accent: '#6d28d9', surface: '#0f0f14', tagline: 'Hero, features, pricing. Ship it.'         } },
-  { name: 'Event',          category: 'Events',       sortOrder: 8,  contentJson: { motif: 'spotlight', accent: '#c2410c', surface: '#09090b', tagline: 'Build anticipation, sell the night.'        } },
-  { name: 'Nonprofit',      category: 'Community',    sortOrder: 9,  contentJson: { motif: 'leaf',      accent: '#065f46', surface: '#f0faf6', tagline: 'Mission first. Donations follow.'          } },
+  // ─── Full multi-page HTML storefronts (from ZIP) ─────────────────────────
+  {
+    name: 'Pulse Works', category: 'Fashion', sortOrder: 1,
+    contentJson: loadHtmlTemplate('pulse'),
+    meta: { motif: 'dark-type', accent: '#ff3a17', surface: '#0e0d0c', tagline: 'Drop-based streetwear. No restocks, ever.' }
+  },
+  {
+    name: 'Forge', category: 'Outdoor', sortOrder: 2,
+    contentJson: loadHtmlTemplate('forge'),
+    meta: { motif: 'technical', accent: '#d4ff3a', surface: '#111210', tagline: 'Work-worthy gear. Built for the tenth season.' }
+  },
+  // ─── Standard single-page builder templates ───────────────────────────────
+  { name: 'Portfolio',      category: 'Portfolio',    sortOrder: 3,  contentJson: { motif: 'monogram',  accent: '#1a1f1d', surface: '#f9f7f4', tagline: 'Show your work. Land the client.'           } },
+  { name: 'Small Business', category: 'Business',     sortOrder: 4,  contentJson: { motif: 'stripes',   accent: '#1d4e6e', surface: '#f0f4f7', tagline: 'From quote to booking in minutes.'          } },
+  { name: 'Restaurant',     category: 'Food & Drink', sortOrder: 5,  contentJson: { motif: 'menu',      accent: '#7c2d12', surface: '#fdf6ee', tagline: 'A menu worth sitting down for.'             } },
+  { name: 'Photography',    category: 'Creative',     sortOrder: 6,  contentJson: { motif: 'grid',      accent: '#1a1f1d', surface: '#0a0a0a', tagline: 'Full-bleed images, nothing in the way.'    } },
+  { name: 'Agency',         category: 'Business',     sortOrder: 7,  contentJson: { motif: 'blocks',    accent: '#2a4d9a', surface: '#f4f6fb', tagline: 'Case studies that close deals.'             } },
+  { name: 'Blog',           category: 'Publishing',   sortOrder: 8,  contentJson: { motif: 'lines',     accent: '#198754', surface: '#fafafa', tagline: 'Long-form writing with room to breathe.'   } },
+  { name: 'SaaS',           category: 'Technology',   sortOrder: 9,  contentJson: { motif: 'gradient',  accent: '#6d28d9', surface: '#0f0f14', tagline: 'Hero, features, pricing. Ship it.'         } },
+  { name: 'Event',          category: 'Events',       sortOrder: 10, contentJson: { motif: 'spotlight', accent: '#c2410c', surface: '#09090b', tagline: 'Build anticipation, sell the night.'        } },
+  { name: 'Nonprofit',      category: 'Community',    sortOrder: 11, contentJson: { motif: 'leaf',      accent: '#065f46', surface: '#f0faf6', tagline: 'Mission first. Donations follow.'          } },
 ];
 
 async function main() {
@@ -290,19 +315,20 @@ async function main() {
     }
   }
 
-  // Seed templates (only if table is empty — idempotent)
-  const templateCount = await prisma.template.count();
-  if (templateCount === 0) {
-    await prisma.template.createMany({
-      data: templateSeeds.map((template) => ({
-        ...template,
-        contentJson: template.contentJson
-      }))
-    });
-    console.log(`Seeded ${templateSeeds.length} templates.`);
-  } else {
-    console.log(`Templates already seeded (${templateCount} rows), skipping.`);
+  // Seed templates — upsert by name so re-running the seed updates HTML content
+  for (const template of templateSeeds) {
+    const { meta: _meta, ...data } = template as typeof template & { meta?: unknown };
+    const existing = await prisma.template.findFirst({ where: { name: data.name } });
+    if (existing) {
+      await prisma.template.update({
+        where: { id: existing.id },
+        data: { contentJson: data.contentJson, sortOrder: data.sortOrder, category: data.category }
+      });
+    } else {
+      await prisma.template.create({ data: { name: data.name, category: data.category, sortOrder: data.sortOrder, contentJson: data.contentJson } });
+    }
   }
+  console.log(`Seeded/updated ${templateSeeds.length} templates.`);
 
   // Seed default pricing rules
   const pricingRules = [

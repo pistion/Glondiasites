@@ -9,12 +9,13 @@ import {
   createBuilderSite, updateBuilderSite,
   saveBuilderPage, publishBuilderSite,
   createBuilderPage, deleteBuilderPage, listPageVersions,
-  getBuilderSite,
+  getBuilderSite, listBuilderPages,
   importBuilderSiteFromGithub,
   parseGithubRepo,
   createRenderDeployment,
   getRenderSettings,
   getStoredAuth,
+  aiEditBuilderPage,
 } from './api';
 import { STOREFRONT_TEMPLATES, StorefrontPreview, StorefrontModal } from './storefront-templates';
 
@@ -928,6 +929,154 @@ const BLANK_CONTENT = {
   contactAddress: '',
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// HtmlTemplateEditor — iframe preview + OpenAI chat panel for multi-page
+// HTML template sites (Pulse Works, Forge, etc.)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function HtmlTemplateEditor({ allPages, currentPage, onSwitchPage, onHtmlChange, saving }) {
+  const [prompt, setPrompt] = useStateB('');
+  const [loading, setLoading] = useStateB(false);
+  const [history, setHistory] = useStateB([]);
+  const [error, setError] = useStateB(null);
+  const iframeRef = React.useRef(null);
+
+  const html = currentPage?.content?.html || '';
+  const pagePath = currentPage?.path || '/';
+
+  // Write HTML into the sandboxed iframe
+  React.useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe || !html) return;
+    const doc = iframe.contentDocument || iframe.contentWindow?.document;
+    if (!doc) return;
+    doc.open();
+    doc.write(html);
+    doc.close();
+  }, [html]);
+
+  const handleAiEdit = async (e) => {
+    e.preventDefault();
+    if (!prompt.trim() || !html) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await aiEditBuilderPage(html, prompt.trim(), pagePath);
+      onHtmlChange(result.html);
+      setHistory(prev => [{ prompt: prompt.trim(), summary: result.summary, ts: Date.now() }, ...prev]);
+      setPrompt('');
+    } catch (err) {
+      setError(err.message || 'AI edit failed. Check your OPENAI_API_KEY.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr 340px', height: 'calc(100vh - 140px)', gap: 0, border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
+
+      {/* Page navigator */}
+      <div style={{ borderRight: '1px solid var(--border)', background: 'var(--bg-deep)', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', fontSize: 11, fontWeight: 600, letterSpacing: '.06em', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+          Pages
+        </div>
+        {allPages.map((page) => (
+          <button
+            key={page.id}
+            onClick={() => onSwitchPage(page)}
+            style={{
+              textAlign: 'left', padding: '11px 16px', background: currentPage?.id === page.id ? 'var(--bg-card)' : 'transparent',
+              border: 'none', borderBottom: '1px solid var(--border)', cursor: 'pointer',
+              borderLeft: currentPage?.id === page.id ? '3px solid var(--accent)' : '3px solid transparent',
+              color: currentPage?.id === page.id ? 'var(--text)' : 'var(--text-muted)', fontSize: 13
+            }}
+          >
+            <div style={{ fontWeight: 500 }}>{page.title}</div>
+            <div style={{ fontSize: 11, marginTop: 2, opacity: .6, fontFamily: 'monospace' }}>{page.path || '/'}</div>
+          </button>
+        ))}
+      </div>
+
+      {/* Live iframe preview */}
+      <div style={{ background: '#000', position: 'relative', overflow: 'hidden' }}>
+        {saving && (
+          <div style={{ position: 'absolute', top: 12, right: 12, zIndex: 10, background: 'rgba(0,0,0,.7)', color: '#fff', fontSize: 11, padding: '4px 10px', borderRadius: 4 }}>
+            Saving…
+          </div>
+        )}
+        <iframe
+          ref={iframeRef}
+          sandbox="allow-scripts allow-same-origin"
+          style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
+          title="Template preview"
+        />
+      </div>
+
+      {/* AI chat panel */}
+      <div style={{ borderLeft: '1px solid var(--border)', background: 'var(--bg-card)', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ fontWeight: 600, fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <ICN.Sparkles size={15} style={{ color: 'var(--accent)' }} />
+            AI Editor
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+            Describe what to change on this page — GPT-4o will edit the HTML for you.
+          </div>
+        </div>
+
+        {/* Change history */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {history.length === 0 && (
+            <div style={{ color: 'var(--text-muted)', fontSize: 13, marginTop: 8 }}>
+              <div style={{ marginBottom: 6, fontWeight: 500 }}>Try asking:</div>
+              {[
+                'Change the brand name to "NorthEdge"',
+                'Update the accent colour to electric blue',
+                'Rewrite the hero headline to target outdoor runners',
+                'Add a 20% off sale banner at the top',
+                'Translate the entire page to Spanish',
+              ].map(s => (
+                <button key={s} onClick={() => setPrompt(s)}
+                  style={{ display: 'block', textAlign: 'left', padding: '7px 10px', marginBottom: 5, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)', width: '100%' }}>
+                  "{s}"
+                </button>
+              ))}
+            </div>
+          )}
+          {history.map((h) => (
+            <div key={h.ts} style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, padding: '10px 12px', fontSize: 12 }}>
+              <div style={{ fontWeight: 500, color: 'var(--text)', marginBottom: 4 }}>"{h.prompt}"</div>
+              <div style={{ color: 'var(--accent)', fontSize: 11 }}>✓ {h.summary}</div>
+            </div>
+          ))}
+          {error && (
+            <div style={{ background: 'var(--danger-bg, #fff0f0)', border: '1px solid var(--danger)', borderRadius: 6, padding: '10px 12px', fontSize: 12, color: 'var(--danger)' }}>
+              {error}
+            </div>
+          )}
+        </div>
+
+        {/* Prompt input */}
+        <form onSubmit={handleAiEdit} style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <textarea
+            value={prompt}
+            onChange={e => setPrompt(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAiEdit(e); }}}
+            placeholder="Describe what to change… (Enter to send)"
+            rows={3}
+            style={{ width: '100%', resize: 'vertical', padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 13, background: 'var(--bg)', color: 'var(--text)', outline: 'none', fontFamily: 'inherit' }}
+          />
+          <button type="submit" disabled={loading || !prompt.trim()}
+            className="btn btn-primary"
+            style={{ width: '100%', justifyContent: 'center' }}>
+            {loading ? <><ICN.RefreshCw size={14} /> Editing…</> : <><ICN.Sparkles size={14} /> Apply with AI</>}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export function BuilderEditor({ id, siteId: initialSiteId, navigate }) {
   const { templates, loading: templatesLoading } = useTemplates();
   const { domains } = useDomains();
@@ -944,6 +1093,11 @@ export function BuilderEditor({ id, siteId: initialSiteId, navigate }) {
   const [loadedSite, setLoadedSite] = useStateB(null);
   const autoSaveTimer = React.useRef(null);
   const isGithubImport = content._source === 'github';
+  const isHtmlTemplate = content._source === 'html-template';
+  const [allPages, setAllPages] = useStateB([]);
+  const [currentPage, setCurrentPage] = useStateB(null);
+  const [savingHtml, setSavingHtml] = useStateB(false);
+
   const siteSlug = tpl
     ? (content.siteName || tpl.id).toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '') || tpl.id
     : '';
@@ -997,6 +1151,13 @@ export function BuilderEditor({ id, siteId: initialSiteId, navigate }) {
           siteName: site.name || prev.siteName,
           ...homePage.content,
         }));
+        // HTML template site: load all pages for the page navigator
+        if (homePage.content?._source === 'html-template') {
+          setCurrentPage(homePage);
+          listBuilderPages(initialSiteId).then(pages => {
+            setAllPages(pages || []);
+          }).catch(() => {});
+        }
       }
       setSiteId(site.id);
       setLoadedSite(site);
@@ -1068,27 +1229,52 @@ export function BuilderEditor({ id, siteId: initialSiteId, navigate }) {
       </div>
 
       <div className="card card-flush" style={{ overflow: "hidden", margin: "0 -28px -28px", borderLeft: 0, borderRight: 0, borderBottom: 0, borderRadius: 0 }}>
-        <div className="bld-split">
-          {isGithubImport
-            ? <ImportedGithubWorkspace content={content} site={loadedSite} navigate={navigate} />
-            : <BuilderForm tab={tab} setTab={setTab} content={content} update={update} tpl={tpl} siteSlug={siteSlug} domains={domains} selectedDomain={selectedDomain} setSelectedDomain={setSelectedDomain} />}
-          <div className="bld-preview">
-            {isGithubImport ? (
-              <ImportedGithubPreview content={content} />
-            ) : (
-              <>
-                <BuilderPreview tab={tab} content={content} tpl={tpl} />
-                <div className="row" style={{ justifyContent: "center", gap: 8, marginTop: 18 }}>
-                  <Tabs value={tab} onChange={setTab} options={[
-                    { value: "home", label: "Home" },
-                    { value: "about", label: "About" },
-                    { value: "contact", label: "Contact" },
-                  ]} />
-                </div>
-              </>
-            )}
+        {isHtmlTemplate ? (
+          <div style={{ padding: '20px 28px' }}>
+            <HtmlTemplateEditor
+              allPages={allPages.length > 0 ? allPages : (loadedSite?.pages || [])}
+              currentPage={currentPage}
+              saving={savingHtml}
+              onSwitchPage={(page) => {
+                setCurrentPage(page);
+                setPageId(page.id);
+                if (page.content) setContent(page.content);
+              }}
+              onHtmlChange={async (newHtml) => {
+                const updated = { ...content, html: newHtml };
+                setContent(updated);
+                if (siteId && pageId) {
+                  setSavingHtml(true);
+                  saveBuilderPage(siteId, pageId, updated)
+                    .catch(() => {})
+                    .finally(() => setSavingHtml(false));
+                }
+              }}
+            />
           </div>
-        </div>
+        ) : (
+          <div className="bld-split">
+            {isGithubImport
+              ? <ImportedGithubWorkspace content={content} site={loadedSite} navigate={navigate} />
+              : <BuilderForm tab={tab} setTab={setTab} content={content} update={update} tpl={tpl} siteSlug={siteSlug} domains={domains} selectedDomain={selectedDomain} setSelectedDomain={setSelectedDomain} />}
+            <div className="bld-preview">
+              {isGithubImport ? (
+                <ImportedGithubPreview content={content} />
+              ) : (
+                <>
+                  <BuilderPreview tab={tab} content={content} tpl={tpl} />
+                  <div className="row" style={{ justifyContent: "center", gap: 8, marginTop: 18 }}>
+                    <Tabs value={tab} onChange={setTab} options={[
+                      { value: "home", label: "Home" },
+                      { value: "about", label: "About" },
+                      { value: "contact", label: "Contact" },
+                    ]} />
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {publishing && <PublishModal onClose={() => setPublishing(false)} content={content} tpl={tpl} siteSlug={siteSlug} navigate={navigate} existingSiteId={siteId} existingPageId={pageId} onPublished={(sid, pid) => { setSiteId(sid); setPageId(pid); }} />}

@@ -84,17 +84,20 @@ export class DeploymentProcessor implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    // ── Builder-source deployments: no build step needed ──────────────────────
-    // The builder service manages content directly in the database.
+    // ── Builder-source deployments ────────────────────────────────────────────
+    // Builder sites (including HTML-template multi-page sites) are stored in the
+    // database and served directly by the app — no build step required. Transition
+    // straight to `deployed` so the deployment is marked live immediately.
     if (deployment.source === DeploymentSource.builder) {
+      const startedAt = new Date();
       await this.transitionDeployment(
         deployment.id,
         organizationId,
         DeploymentStatus.queued,
         DeploymentStatus.deployed,
-        'Builder site published — no build step required.',
+        'Builder site published — content served from database.',
         {},
-        { startedAt: new Date(), finishedAt: new Date() }
+        { startedAt, finishedAt: new Date() }
       );
       return;
     }

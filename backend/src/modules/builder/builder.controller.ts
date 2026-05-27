@@ -6,6 +6,7 @@ import { RbacGuard } from '../../common/guards/rbac.guard';
 import { RequestWithContext } from '../../common/types/request-with-context';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { BuilderService } from './builder.service';
+import { AiEditDto } from './dto/ai-edit.dto';
 import { CreatePageDto } from './dto/create-page.dto';
 import { CreateSiteDto } from './dto/create-site.dto';
 import { SavePageContentDto } from './dto/save-page-content.dto';
@@ -136,6 +137,15 @@ export class BuilderController {
     @Req() request: RequestWithContext
   ) {
     return this.builderService.listPageVersions(siteId, pageId, this.ctx(request));
+  }
+
+  // ─── AI Editing ──────────────────────────────────────────────────────────────
+
+  @Post('builder/ai/edit')
+  @RequirePermissions('builder:update')
+  @ApiCreatedResponse({ description: 'Uses GPT-4o to edit a page\'s HTML based on a plain-English instruction.' })
+  aiEditPage(@Body() dto: AiEditDto) {
+    return this.builderService.aiEditPage(dto);
   }
 
   // ─── Upload ──────────────────────────────────────────────────────────────────
