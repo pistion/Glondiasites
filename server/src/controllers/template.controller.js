@@ -1,28 +1,49 @@
 /**
  * TemplateController
- * Handles template gallery data as defined in 08_BUILDER_TEMPLATES_SITES_CONTROLLER.md
+ * Returns the two production HTML templates: Pulse Works and Forge.
  */
+
+const TEMPLATES = [
+  {
+    id:       "pulse-works",
+    name:     "Pulse Works",
+    category: "Fashion",
+    tagline:  "Drop-based streetwear. No restocks, ever.",
+    accent:   "#ff3a17",
+    surface:  "#0e0d0c",
+    motif:    "html-dark",
+    isHtmlTemplate: true,
+  },
+  {
+    id:       "forge",
+    name:     "Forge",
+    category: "Outdoor",
+    tagline:  "Work-worthy gear. Built for the tenth season.",
+    accent:   "#d4ff3a",
+    surface:  "#111210",
+    motif:    "html-dark",
+    isHtmlTemplate: true,
+  },
+];
 
 const TemplateController = {
   listTemplates: async (req, res) => {
-    res.ok([
-      { id: "linen", name: "Linen", category: "Personal", tagline: "Quiet portfolio with a serif voice." },
-      { id: "harbor", name: "Harbor", category: "Small business", tagline: "Trades and service business landing." }
-    ]);
+    res.ok(TEMPLATES);
   },
 
   listCategories: async (req, res) => {
-    res.ok(["Personal", "Small business", "Restaurant", "Photography", "Agency", "Blog", "SaaS", "Event", "Nonprofit"]);
+    res.ok([...new Set(TEMPLATES.map((t) => t.category))]);
   },
 
   getTemplate: async (req, res) => {
-    const { templateId } = req.params;
-    res.ok({ id: templateId, name: "Linen", category: "Personal" });
+    const tpl = TEMPLATES.find((t) => t.id === req.params.templateId);
+    if (!tpl) return res.status(404).json({ error: 'Template not found.' });
+    res.ok(tpl);
   },
 
   getTemplatePreview: async (req, res) => {
-    res.ok({ previewUrl: "https://glondia.app/previews/linen.jpg" });
-  }
+    res.ok({ previewUrl: `https://glondia.app/previews/${req.params.templateId}.jpg` });
+  },
 };
 
 export default TemplateController;

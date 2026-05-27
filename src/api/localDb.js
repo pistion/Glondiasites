@@ -1,3 +1,11 @@
+import { pulseWorksTemplate } from '../templates/html/pulse-works';
+import { forgeTemplate } from '../templates/html/forge';
+
+const HTML_TEMPLATES = {
+  'pulse-works': pulseWorksTemplate,
+  forge: forgeTemplate,
+};
+
 const LOCAL_DB_KEY = "glondia.localDb.v1";
 
 export function createLocalDbRuntime({ makeSession, ttlToSeconds }) {
@@ -878,7 +886,12 @@ export function createLocalDbRuntime({ makeSession, ttlToSeconds }) {
       outputDirectory: input.outputDirectory || null,
       createdAt: now,
       updatedAt: now,
-      pages: [makeBuilderPage({ siteId, title: 'Home', path: '/', content: input.content || {} })],
+      pages: (() => {
+        const htmlTemplate = HTML_TEMPLATES[input.templateId];
+        return htmlTemplate
+          ? makeHtmlTemplatePages(siteId, htmlTemplate)
+          : [makeBuilderPage({ siteId, title: 'Home', path: '/', content: input.content || {} })];
+      })(),
     };
   }
 
@@ -893,6 +906,23 @@ export function createLocalDbRuntime({ makeSession, ttlToSeconds }) {
       content: input.content || {},
       updatedAt: new Date().toISOString(),
     };
+  }
+
+  function makeHtmlTemplatePages(siteId, template) {
+    return template.contentJson.pages.map((page, index) => ({
+      id: createId('page'),
+      siteId,
+      title: page.title,
+      path: page.path,
+      status: 'draft',
+      sortOrder: index,
+      content: {
+        html: page.html,
+        _source: 'html-template',
+        templateId: template.id,
+      },
+      updatedAt: new Date().toISOString(),
+    }));
   }
 
   function makeActivity(action, message, entityType, entityId) {

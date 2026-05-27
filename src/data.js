@@ -2,6 +2,9 @@
 // All dynamic content (projects, deployments, domains, etc.) is loaded from the API.
 // Shells are kept here so hooks have a safe initial/fallback value of [].
 
+import { pulseWorksTemplate } from './templates/html/pulse-works';
+import { forgeTemplate } from './templates/html/forge';
+
 // Set TEMPLATES_REPO to the GitHub (or GitLab) repository where your template
 // source files live. Each template's folder must match its id (e.g. /linen, /harbor).
 // When set, a "View source" link appears on every template card in the gallery.
@@ -40,8 +43,8 @@ export const GD = {
   ],
 
   templates: [
-    { id: "pulse-works",  name: "Pulse Works",    category: "Fashion",       tagline: "Drop-based streetwear. No restocks, ever.",    accent: "#ff3a17", surface: "#0e0d0c", motif: "html-dark", isHtmlTemplate: true },
-    { id: "forge",        name: "Forge",          category: "Outdoor",       tagline: "Work-worthy gear. Built for the tenth season.", accent: "#d4ff3a", surface: "#111210", motif: "html-dark", isHtmlTemplate: true },
+    pulseWorksTemplate,
+    forgeTemplate,
     { id: "portfolio",    name: "Portfolio",      category: "Portfolio",     tagline: "Show your work. Land the client.",             accent: "#1a1f1d", surface: "#f9f7f4", motif: "monogram"  },
     { id: "small-biz",   name: "Small Business", category: "Business",      tagline: "From quote to booking in minutes.",            accent: "#1d4e6e", surface: "#f0f4f7", motif: "stripes"  },
     { id: "restaurant",  name: "Restaurant",     category: "Food & Drink",  tagline: "A menu worth sitting down for.",               accent: "#7c2d12", surface: "#fdf6ee", motif: "menu"     },
