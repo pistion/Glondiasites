@@ -35,6 +35,20 @@ services:
         value: "30"
       - key: PAYPAL_SANDBOX
         value: "true"
+      - key: PRISMA_CONNECTION_LIMIT
+        value: "10"
+      - key: PRISMA_POOL_TIMEOUT
+        value: "10"
+      - key: PRISMA_SLOW_QUERY_MS
+        value: "200"
+      - key: PRISMA_LOG_QUERIES
+        value: "false"
+      - key: PRISMA_TX_MAX_WAIT_MS
+        value: "5000"
+      - key: PRISMA_TX_TIMEOUT_MS
+        value: "15000"
+      - key: AUDIT_LOG_ENABLED
+        value: "true"
 
       # All secrets below are already set in the Render dashboard.
       # sync: false means Render will NOT override them from this file.

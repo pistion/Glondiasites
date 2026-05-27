@@ -35,6 +35,7 @@ import domainHostingRoutes from './routes/domainRoutes.js';
 import diskRoutes from './routes/diskRoutes.js';
 import vpsHostingRoutes from './routes/vpsHostingRoutes.js';
 import { prisma } from './services/db.js';
+import { auditWrites } from './middleware/audit.middleware.js';
 import deploymentService from './services/deploymentService.js';
 import renderApiService from './services/renderApiService.js';
 import { makeId, mutateHostingStore, nowIso, readHostingStore } from './services/hostingStore.js';
@@ -119,6 +120,7 @@ app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '1mb' }));
 app.use(morgan(isProd ? 'combined' : 'dev'));
 app.use(requestId);
 app.use(responseHelper);
+app.use(auditWrites);
 
 // ── Health check (must come before API and static routes) ───────────────────
 app.get('/healthz', async (req, res) => {
