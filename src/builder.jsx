@@ -55,6 +55,32 @@ function TplThumb({ tpl }) {
     </div>
   );
 
+  if (motif === 'html-dark') {
+    // Multi-page HTML storefront — dark surface, accent stripe, page stacks
+    return (
+      <div style={{ width: '100%', height: '100%', background: surface, display: 'flex', flexDirection: 'column', padding: 14 }}>
+        <Nav />
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 8 }}>
+          <div style={{ height: 3, background: accent, borderRadius: 99, width: '100%' }} />
+          <div style={{ height: 22, borderRadius: 3, background: `${accent}22`, marginBottom: 4 }} />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+            {[1,2,3].map(i => (
+              <div key={i} style={{ height: 36, borderRadius: 4, background: overlay, border: `1px solid ${accent}33`, display: 'flex', alignItems: 'flex-end', padding: 4 }}>
+                <div style={{ height: 4, width: '70%', borderRadius: 99, background: `${accent}66` }} />
+              </div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
+            {['/', '/shop', '/about', '/contact', '+1'].map((pg, i) => (
+              <div key={i} style={{ padding: '2px 7px', background: i === 0 ? accent : overlay, borderRadius: 99, fontSize: 7, color: i === 0 ? surface : `${accent}99`, fontWeight: 600, letterSpacing: '0.04em' }}>
+                {pg}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
   if (motif === 'monogram') {
     // Personal portfolio — big centered letterform
     return (
@@ -870,11 +896,21 @@ export function BuilderTemplates({ navigate }) {
                     <span className="faint" style={{ fontSize: 11 }}>{t.category}</span>
                   </div>
                   <p className="muted" style={{ margin: 0, fontSize: 13 }}>{t.tagline}</p>
-                  <div className="tag-row">
-                    <span className="ttag">Home</span>
-                    <span className="ttag">About</span>
-                    <span className="ttag">Contact</span>
-                  </div>
+                  {t.contentJson?._source === 'html-template' ? (
+                    <div className="tag-row">
+                      <span className="ttag" style={{ background: 'var(--accent-soft)', color: 'var(--accent-ink)', border: '1px solid var(--accent)' }}>HTML</span>
+                      {Array.isArray(t.contentJson?.pages) && (
+                        <span className="ttag">{t.contentJson.pages.length} pages</span>
+                      )}
+                      <span className="ttag">AI editable</span>
+                    </div>
+                  ) : (
+                    <div className="tag-row">
+                      <span className="ttag">Home</span>
+                      <span className="ttag">About</span>
+                      <span className="ttag">Contact</span>
+                    </div>
+                  )}
                   <div className="row" style={{ gap: 8, marginTop: 12 }}>
                     <button className="btn btn-sm btn-primary" style={{ flex: 1 }}
                             onClick={() => navigate({ view: "builder-editor", params: { id: t.id } })}>
@@ -1093,7 +1129,11 @@ export function BuilderEditor({ id, siteId: initialSiteId, navigate }) {
   const [loadedSite, setLoadedSite] = useStateB(null);
   const autoSaveTimer = React.useRef(null);
   const isGithubImport = content._source === 'github';
-  const isHtmlTemplate = content._source === 'html-template';
+  // isHtmlTemplate is true when:
+  //  (a) an existing site's page content has _source=html-template (loaded from DB), OR
+  //  (b) the selected template's contentJson declares _source=html-template (fresh editor)
+  const isHtmlTemplate = content._source === 'html-template'
+    || tpl?.contentJson?._source === 'html-template';
   const [allPages, setAllPages] = useStateB([]);
   const [currentPage, setCurrentPage] = useStateB(null);
   const [savingHtml, setSavingHtml] = useStateB(false);
@@ -1136,6 +1176,28 @@ export function BuilderEditor({ id, siteId: initialSiteId, navigate }) {
       setSavingDraft(false);
     }
   };
+
+  // When a fresh HTML-template is selected (no saved site yet), populate the page
+  // navigator from the template's contentJson pages so the user sees a real preview
+  // before clicking Save Draft (which calls createBuilderSite).
+  React.useEffect(() => {
+    if (initialSiteId) return; // let the site-load effect handle this case
+    const templateContent = tpl?.contentJson;
+    if (templateContent?._source !== 'html-template') return;
+    const pages = Array.isArray(templateContent.pages) ? templateContent.pages : [];
+    const synthetic = pages.map((p, i) => ({
+      id: `tpl-preview-${i}`,
+      title: p.title || `Page ${i + 1}`,
+      path: p.path || '/',
+      content: { _source: 'html-template', html: p.html || '', _filename: p.filename || `page${i}.html` },
+      sortOrder: i,
+    }));
+    setAllPages(synthetic);
+    if (synthetic.length > 0 && !currentPage) setCurrentPage(synthetic[0]);
+    // Stamp _source onto content so isHtmlTemplate stays true
+    setContent(prev => ({ ...prev, _source: 'html-template' }));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tpl?.id, initialSiteId]);
 
   // Load existing site content when siteId is provided. Imported GitHub/upload sites
   // live in the local workspace too, so this must not depend on an auth token.

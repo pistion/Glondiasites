@@ -44,7 +44,8 @@ export function useTemplates() {
         // Any template the API adds beyond the local set gets sensible visual defaults.
         const merged = apiTemplates.map((raw) => {
           const api = mapApiTemplate(raw);
-          const local = GD.templates.find((g) => g.id === api.id) || {};
+          // Match by name (API ids are UUIDs; local ids are design slugs)
+          const local = GD.templates.find((g) => g.name === api.name) || {};
           return {
             // Local visual data first, then override with API authoritative fields
             accent:   local.accent   || '#1a1f1d',

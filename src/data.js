@@ -40,6 +40,8 @@ export const GD = {
   ],
 
   templates: [
+    { id: "pulse-works",  name: "Pulse Works",    category: "Fashion",       tagline: "Drop-based streetwear. No restocks, ever.",    accent: "#ff3a17", surface: "#0e0d0c", motif: "html-dark", isHtmlTemplate: true },
+    { id: "forge",        name: "Forge",          category: "Outdoor",       tagline: "Work-worthy gear. Built for the tenth season.", accent: "#d4ff3a", surface: "#111210", motif: "html-dark", isHtmlTemplate: true },
     { id: "portfolio",    name: "Portfolio",      category: "Portfolio",     tagline: "Show your work. Land the client.",             accent: "#1a1f1d", surface: "#f9f7f4", motif: "monogram"  },
     { id: "small-biz",   name: "Small Business", category: "Business",      tagline: "From quote to booking in minutes.",            accent: "#1d4e6e", surface: "#f0f4f7", motif: "stripes"  },
     { id: "restaurant",  name: "Restaurant",     category: "Food & Drink",  tagline: "A menu worth sitting down for.",               accent: "#7c2d12", surface: "#fdf6ee", motif: "menu"     },
