@@ -121,18 +121,4 @@ export class BillingRepository {
     return this.prisma.organization.findUnique({ where: { id } });
   }
 
-  updateOrganizationStripeCustomerId(organizationId: string, stripeCustomerId: string) {
-    return this.prisma.organization.update({
-      where: { id: organizationId },
-      data: { stripeCustomerId }
-    });
-  }
-
-  async findOrgByStripeCustomer(stripeCustomerId: string) {
-    const org = await this.prisma.organization.findFirst({
-      where: { stripeCustomerId },
-      select: { id: true }
-    });
-    return org?.id ?? null;
-  }
 }
