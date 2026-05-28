@@ -61,12 +61,25 @@ export async function createSiteFromTailoredTemplate(templateId, answers, tailor
 }
 
 /**
- * Trigger a Render deployment for a tailored site.
+ * Retrieve a persisted tailored site by siteId.
  * @param {string} siteId
- * @returns {Promise<{ status, siteId, message }>}
+ * @returns {Promise<{ siteId, templateId, answers, pages, status, createdAt, updatedAt }>}
  */
-export async function deployTailoredTemplate(siteId) {
+export async function getTailoredTemplateSite(siteId) {
+  return liveApiRequest(`/template-ai/sites/${encodeURIComponent(siteId)}`, {
+    method: 'GET',
+  });
+}
+
+/**
+ * Trigger a deployment for a tailored site.
+ * @param {string} siteId
+ * @param {object} deploymentSettings — { siteName, serviceType, plan }
+ * @returns {Promise<{ status, siteId, deploymentId, message }>}
+ */
+export async function deployTailoredTemplate(siteId, deploymentSettings = {}) {
   return liveApiRequest(`/template-ai/sites/${encodeURIComponent(siteId)}/deploy`, {
     method: 'POST',
+    body: deploymentSettings,
   });
 }

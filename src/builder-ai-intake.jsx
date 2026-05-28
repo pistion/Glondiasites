@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react'; // useRef kept for chatEndRef / inputRef
 import { ICN } from './icons';
 import { GD } from './data';
-import { generateTailoredTemplate } from './api/template-ai.js';
+import { generateTailoredTemplate, createSiteFromTailoredTemplate } from './api/template-ai.js';
 
 // ─── Intake question sequence (client-side; mirrors the backend list) ─────────
 const QUESTIONS = [
@@ -87,6 +87,7 @@ export function BuilderAiIntake({ templateId, templateType, navigate }) {
   const [tailoredPages,  setTailoredPages]  = useState(null);
   const [genError,       setGenError]       = useState(null);
   const [showPreview,    setShowPreview]    = useState(false);
+  const [siteId,         setSiteId]         = useState(null);
 
   const chatEndRef = useRef(null);
   const inputRef   = useRef(null);
@@ -145,8 +146,8 @@ export function BuilderAiIntake({ templateId, templateType, navigate }) {
   // ── Generate tailored HTML ──────────────────────────────────────────────────
   const handlePreview = async () => {
     if (!isHtml || tplPages.length === 0) {
-      // Storefront or non-HTML template — go directly to deployment settings
-      navigate({ view: 'builder-deployment-settings', params: { templateId, templateType } });
+      // Storefront or non-HTML template — persist draft then go to deployment settings
+      await handleContinueToDeployment();
       return;
     }
 
@@ -165,11 +166,22 @@ export function BuilderAiIntake({ templateId, templateType, navigate }) {
         const tailoredHtml = result?.pages?.[0]?.html || page.html || '';
         tailored.push({ title: page.title || 'Home', path: page.path || '/', html: tailoredHtml });
       }
+
+      // Persist the tailored site so deployment settings can load it
+      let persistedSiteId = null;
+      try {
+        const record = await createSiteFromTailoredTemplate(templateId, answers, tailored);
+        persistedSiteId = record.siteId;
+        setSiteId(persistedSiteId);
+      } catch {
+        // Non-fatal — preview still shows; deployment settings will create a new record if needed
+      }
+
       setTailoredPages(tailored);
       setShowPreview(true);
       setMessages(prev => [...prev, {
         role: 'ai',
-        text: `✓ Done! Your tailored site is ready to preview. Use "Open in editor" to make further changes, or deploy directly.`,
+        text: `✓ Done! Your tailored site is ready to preview. Click "Deploy this site" to go live, or continue to deployment settings to configure hosting.`,
       }]);
     } catch (err) {
       const msg = err.message || 'Tailoring failed. Please try again.';
@@ -180,8 +192,25 @@ export function BuilderAiIntake({ templateId, templateType, navigate }) {
     }
   };
 
-  const handleContinueToDeployment = () => {
-    navigate({ view: 'builder-deployment-settings', params: { templateId, templateType } });
+  const handleContinueToDeployment = async () => {
+    // If we already have a siteId from preview generation, go straight there
+    if (siteId) {
+      navigate({ view: 'builder-deployment-settings', params: { siteId, templateId, templateType } });
+      return;
+    }
+    // Otherwise persist a draft (with whatever tailored pages we have, or empty) then navigate
+    try {
+      const record = await createSiteFromTailoredTemplate(
+        templateId,
+        answers,
+        tailoredPages || [],
+      );
+      setSiteId(record.siteId);
+      navigate({ view: 'builder-deployment-settings', params: { siteId: record.siteId, templateId, templateType } });
+    } catch {
+      // If persistence fails, navigate anyway — deployment settings handles missing siteId gracefully
+      navigate({ view: 'builder-deployment-settings', params: { templateId, templateType } });
+    }
   };
 
   // ── Render ──────────────────────────────────────────────────────────────────

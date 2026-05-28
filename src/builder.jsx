@@ -18,6 +18,7 @@ import {
   aiEditBuilderPage,
 } from './api';
 import { STOREFRONT_TEMPLATES, StorefrontPreview, StorefrontModal } from './storefront-templates';
+import { getTailoredTemplateSite, deployTailoredTemplate } from './api/template-ai.js';
 
 const ROXANNE_IMAGE = "/images/roxanne-ai-card.png";
 
@@ -245,7 +246,14 @@ function TemplateCardPreview({ tpl }) {
   const pages = Array.isArray(tpl?.contentJson?.pages) ? tpl.contentJson.pages : [];
   const firstPage = pages[0];
 
-  if (!firstPage?.html) return <TplThumb tpl={tpl} />;
+  if (!firstPage?.html) {
+    return (
+      <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, background: 'var(--bg-deep)', color: 'var(--text-muted)' }}>
+        <ICN.Image size={22} />
+        <span style={{ fontSize: 11 }}>Preview unavailable</span>
+      </div>
+    );
+  }
 
   return (
     <iframe
@@ -316,7 +324,7 @@ function TemplatePreviewModal({ template, onClose, onHost }) {
         <div style={{ flex: 1 }} />
 
         <button className="btn btn-primary" onClick={() => onHost(template)}>
-          <ICN.Rocket size={14} /> Host this template
+          <ICN.Sparkles size={14} /> Use AI to customize
         </button>
       </div>
 
@@ -343,58 +351,40 @@ export function BuilderGallery({ navigate }) {
       <div className="page-head">
         <div>
           <div className="page-eyebrow">Site builder</div>
-          <h1>Choose how your site starts</h1>
+          <h1>Launch your website</h1>
           <p className="sub">
-            Start with RoxanneAI, pick a Glondia template, or bring in an existing project from GitHub or an upload.
+            Pick a professionally designed template, answer a few questions, and we'll tailor it to your brand before it goes live.
           </p>
         </div>
       </div>
 
-      <div className="builder-choice-grid">
-        <button type="button" className="builder-choice-card builder-choice-card--roxanne" onClick={() => navigate({ view: "builder-roxanne" })}>
-          <div className="roxanne-choice-media">
-            <img src={ROXANNE_IMAGE} alt="RoxanneAI" />
-          </div>
-          <div className="builder-choice-body">
-            <span className="choice-icon"><ICN.Sparkles size={18} /></span>
-            <div>
-              <h2>Build with RoxanneAI</h2>
-              <p>Describe the site you want and let RoxanneAI shape the first draft.</p>
+      <div className="builder-gallery-hero">
+        <div className="builder-gallery-hero-text">
+          <div className="builder-gallery-hero-steps">
+            <div className="builder-gallery-hero-step">
+              <span className="builder-gallery-hero-step-num">1</span>
+              <span>Choose a template</span>
+            </div>
+            <ICN.ArrowRight size={14} className="builder-gallery-hero-arrow" />
+            <div className="builder-gallery-hero-step">
+              <span className="builder-gallery-hero-step-num">2</span>
+              <span>AI customises it for you</span>
+            </div>
+            <ICN.ArrowRight size={14} className="builder-gallery-hero-arrow" />
+            <div className="builder-gallery-hero-step">
+              <span className="builder-gallery-hero-step-num">3</span>
+              <span>Deploy and go live</span>
             </div>
           </div>
-          <span className="choice-cta">Start with AI <ICN.ArrowRight size={14} /></span>
-        </button>
-
-        <button type="button" className="builder-choice-card" onClick={() => navigate({ view: "builder-templates" })}>
-          <div className="builder-choice-preview template-choice-preview">
-            <div /><div /><div /><div />
-          </div>
-          <div className="builder-choice-body">
-            <span className="choice-icon"><ICN.Layers size={18} /></span>
-            <div>
-              <h2>Use our templates</h2>
-              <p>Choose a polished starter and customize content, pages, domain, and publishing.</p>
-            </div>
-          </div>
-          <span className="choice-cta">Browse templates <ICN.ArrowRight size={14} /></span>
-        </button>
-
-        <button type="button" className="builder-choice-card builder-import-card" onClick={() => navigate({ view: "builder-import", params: { mode: "github" } })}>
-          <div className="builder-choice-preview import-choice-preview">
-            <ICN.Code size={26} />
-            <span className="mono">index.html</span>
-          </div>
-          <div className="builder-choice-body">
-            <span className="choice-icon"><ICN.Git size={18} /></span>
-            <div>
-              <h2>Import your own work</h2>
-              <p>Connect a repository or upload a finished site package.</p>
-            </div>
-          </div>
-          <span className="choice-cta">Choose import type <ICN.ArrowRight size={14} /></span>
-        </button>
+          <button
+            type="button"
+            className="btn btn-primary btn-lg"
+            onClick={() => navigate({ view: "builder-templates" })}
+          >
+            <ICN.Layers size={16} /> Browse templates
+          </button>
+        </div>
       </div>
-
     </>
   );
 }
@@ -1343,7 +1333,18 @@ export function BuilderEditor({ id, siteId: initialSiteId, navigate }) {
                 <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg-deep)", color: "var(--accent)" }}>
                   <ICN.Github size={18} />
                 </div>
-              ) : <TplThumb tpl={tpl} />}
+              ) : tpl?.contentJson?.pages?.[0]?.html ? (
+                <iframe
+                  sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
+                  srcDoc={tpl.contentJson.pages[0].html}
+                  style={{ width: '229px', height: '147px', border: 'none', transform: 'scale(0.245)', transformOrigin: 'top left', pointerEvents: 'none', display: 'block' }}
+                  title={`${tpl.name} thumbnail`}
+                />
+              ) : (
+                <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg-deep)", color: "var(--text-muted)" }}>
+                  <ICN.Layers size={16} />
+                </div>
+              )}
             </div>
             <div>
               <h1 style={{ margin: 0 }}>{content.siteName || tpl?.name || content._repository || 'Imported site'}</h1>
@@ -2027,7 +2028,7 @@ function PublishModal({ onClose, content, tpl, siteSlug, navigate, existingSiteI
 // Final step for the customer template flow: site name, Render config, deploy.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function BuilderDeploymentSettings({ templateId, templateType, navigate }) {
+export function BuilderDeploymentSettings({ siteId, templateId, templateType, navigate }) {
   const { templates } = useTemplates();
 
   // Look up template from either HTML templates (GD) or storefront list
@@ -2042,6 +2043,28 @@ export function BuilderDeploymentSettings({ templateId, templateType, navigate }
   const [deployError,  setDeployError]  = useStateB(null);
   const [deployMsg,    setDeployMsg]    = useStateB(null);
 
+  // Tailored site preview — loaded from the persisted record when siteId is available
+  const [tailoredSite,    setTailoredSite]    = useStateB(null);
+  const [previewPage,     setPreviewPage]     = useStateB(null);
+  const [loadingPreview,  setLoadingPreview]  = useStateB(false);
+
+  // Pre-fill site name from intake answers when a tailored site is loaded
+  React.useEffect(() => {
+    if (!siteId) return;
+    setLoadingPreview(true);
+    getTailoredTemplateSite(siteId)
+      .then((site) => {
+        setTailoredSite(site);
+        if (site?.pages?.length > 0) setPreviewPage(site.pages[0]);
+        if (site?.answers?.businessName && !siteName) {
+          setSiteName(site.answers.businessName);
+        }
+      })
+      .catch(() => { /* non-fatal — preview just won't show */ })
+      .finally(() => setLoadingPreview(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [siteId]);
+
   const siteSlug = siteName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '') || 'my-site';
 
   const handleDeploy = async () => {
@@ -2050,27 +2073,40 @@ export function BuilderDeploymentSettings({ templateId, templateType, navigate }
     if (!accessToken) { setDeployError('Sign in to deploy.'); return; }
     setDeploying(true); setDeployError(null);
     try {
-      // 1. Create site record
-      const site = await createBuilderSite({ name: siteName.trim(), templateId: templateId || null });
-      // 2. Publish and create Render deployment
-      const published = await publishBuilderSite(site.id);
-      const deployment = await createRenderDeployment({
-        siteId:          site.id,
-        projectId:       published?.projectId || site.id,
-        name:            siteName.trim(),
-        slug:            siteSlug,
-        serviceType,
-        sourceReference: 'builder',
-        environment:     'production',
-      });
-      setDeployMsg('Deployment started!');
-      navigate({ view: 'hosting-detail', params: { id: deployment.deploymentId } });
+      let deployment;
+      if (siteId) {
+        // Preferred path: deploy via the persisted tailored site record
+        deployment = await deployTailoredTemplate(siteId, {
+          siteName: siteName.trim(),
+          serviceType,
+          plan,
+        });
+      } else {
+        // Fallback: no tailored site — create a plain site record and deploy
+        const site = await createBuilderSite({ name: siteName.trim(), templateId: templateId || null });
+        const published = await publishBuilderSite(site.id);
+        deployment = await createRenderDeployment({
+          siteId:          site.id,
+          projectId:       published?.projectId || site.id,
+          name:            siteName.trim(),
+          slug:            siteSlug,
+          serviceType,
+          sourceReference: 'builder',
+          environment:     'production',
+        });
+      }
+      setDeployMsg('Deployment started! Your site will be live shortly.');
+      if (deployment?.deploymentId) {
+        navigate({ view: 'hosting-detail', params: { id: deployment.deploymentId } });
+      }
     } catch (err) {
       setDeployError(err.message || 'Deployment failed. Please try again.');
     } finally {
       setDeploying(false);
     }
   };
+
+  const tailoredPages = tailoredSite?.pages || [];
 
   return (
     <>
@@ -2098,7 +2134,7 @@ export function BuilderDeploymentSettings({ templateId, templateType, navigate }
         </div>
       </div>
 
-      <div className="deploy-settings-layout">
+      <div className={`deploy-settings-layout${tailoredPages.length > 0 ? ' deploy-settings-layout--with-preview' : ''}`}>
         {/* ── Left: settings form ───────────────────────────────────── */}
         <div className="card" style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}>
           {/* Template info */}
@@ -2180,13 +2216,41 @@ export function BuilderDeploymentSettings({ templateId, templateType, navigate }
           </div>
         </div>
 
+        {/* ── Centre: tailored preview (shown when siteId present) ───── */}
+        {tailoredPages.length > 0 && (
+          <div className="deploy-preview-column">
+            <div className="deploy-preview-header">
+              <div style={{ fontWeight: 600, fontSize: 13 }}>Your tailored site</div>
+              {tailoredPages.length > 1 && (
+                <div style={{ display: 'flex', gap: 4 }}>
+                  {tailoredPages.map((page, i) => (
+                    <button
+                      key={i}
+                      className={`btn btn-sm ${previewPage === page ? 'btn-primary' : 'btn-ghost'}`}
+                      onClick={() => setPreviewPage(page)}
+                    >
+                      {page.title || `Page ${i + 1}`}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <iframe
+              sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
+              srcDoc={previewPage?.html || tailoredPages[0]?.html || '<!doctype html><html><body></body></html>'}
+              className="deploy-preview-iframe"
+              title="Tailored site preview"
+            />
+          </div>
+        )}
+
         {/* ── Right: what happens next ──────────────────────────────── */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div className="card" style={{ padding: 20 }}>
             <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 14 }}>What happens when you click Deploy</div>
             {[
-              'A site record is created in your workspace',
-              'Glondia triggers a Render deployment',
+              'Your tailored site is submitted for deployment',
+              'Glondia triggers a Render hosting deployment',
               'SSL certificate is issued automatically',
               'Site goes live at your Glondia subdomain',
               'Attach a custom domain from Domains at any time',

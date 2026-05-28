@@ -4,7 +4,12 @@
  */
 
 import { tailorHtmlTemplate, INTAKE_QUESTIONS, REQUIRED_KEYS } from '../services/openaiSiteAssistant.service.js';
-import { makeId } from '../services/hostingStore.js';
+import { makeId, nowIso, mutateHostingStore } from '../services/hostingStore.js';
+import {
+  createTemplateSite,
+  getTemplateSite,
+  updateTemplateSite,
+} from '../services/templateSiteStore.js';
 
 // In-memory session store — lightweight, non-persistent (survives restarts poorly but fine for intake)
 const sessions = new Map();
@@ -17,11 +22,6 @@ function maybeCleanSessions() {
     if (new Date(s.createdAt).getTime() < cutoff) sessions.delete(id);
   }
 }
-
-const KNOWN_TEMPLATES = {
-  'pulse-works': { id: 'pulse-works', name: 'Pulse Works', category: 'Fashion'  },
-  'forge':       { id: 'forge',       name: 'Forge',       category: 'Outdoor'  },
-};
 
 // ─── Handlers ─────────────────────────────────────────────────────────────────
 
@@ -48,11 +48,11 @@ async function startIntake(req, res, next) {
     const q = INTAKE_QUESTIONS[0];
     res.json({
       sessionId,
-      question:     q.question,
-      questionKey:  q.key,
+      question:      q.question,
+      questionKey:   q.key,
       questionLabel: q.label,
-      step:         0,
-      totalSteps:   INTAKE_QUESTIONS.length,
+      step:          0,
+      totalSteps:    INTAKE_QUESTIONS.length,
       requiredFields: REQUIRED_KEYS,
       collectedAnswers: {},
     });
@@ -150,23 +150,51 @@ async function generateTailored(req, res, next) {
   } catch (err) { next(err); }
 }
 
-/** POST /api/template-ai/sites */
+/** POST /api/template-ai/sites — persist a tailored site draft */
 async function createSite(req, res, next) {
   try {
     const { templateId, answers, tailoredPages } = req.body || {};
+
     if (!templateId || typeof templateId !== 'string') {
       return res.status(400).json({ error: 'templateId is required.' });
     }
+    if (templateId.length > 100) {
+      return res.status(400).json({ error: 'templateId is too long.' });
+    }
+    if (answers !== undefined && (typeof answers !== 'object' || Array.isArray(answers))) {
+      return res.status(400).json({ error: 'answers must be an object.' });
+    }
+    if (tailoredPages !== undefined && !Array.isArray(tailoredPages)) {
+      return res.status(400).json({ error: 'tailoredPages must be an array.' });
+    }
 
-    const siteId = makeId('tai');
-    res.json({
-      siteId,
+    const site = await createTemplateSite({
       templateId,
-      answers:  answers      || {},
-      pages:    tailoredPages || [],
-      status:   'draft',
-      message:  'Draft site record created. Use the editor or deploy flow to publish.',
+      answers:      answers       || {},
+      tailoredPages: tailoredPages || [],
     });
+
+    res.status(201).json({
+      siteId:     site.siteId,
+      templateId: site.templateId,
+      answers:    site.answers,
+      pages:      site.pages,
+      status:     site.status,
+      createdAt:  site.createdAt,
+    });
+  } catch (err) { next(err); }
+}
+
+/** GET /api/template-ai/sites/:siteId — retrieve a persisted tailored site */
+async function getSite(req, res, next) {
+  try {
+    const { siteId } = req.params;
+    if (!siteId) return res.status(400).json({ error: 'siteId is required.' });
+
+    const site = await getTemplateSite(siteId);
+    if (!site) return res.status(404).json({ error: `Site "${siteId}" not found.` });
+
+    res.json(site);
   } catch (err) { next(err); }
 }
 
@@ -176,20 +204,46 @@ async function deploySite(req, res, next) {
     const { siteId } = req.params;
     if (!siteId) return res.status(400).json({ error: 'siteId is required.' });
 
-    if (!process.env.RENDER_API_KEY) {
-      return res.status(503).json({
-        status:  'not_configured',
-        siteId,
-        message: 'Render deployment is not configured. Add RENDER_API_KEY and set up a customer Render service, then deploy via the GitHub import flow.',
-      });
+    // Load the persisted tailored site
+    const site = await getTemplateSite(siteId);
+    if (!site) {
+      return res.status(404).json({ error: `Site "${siteId}" not found. Complete the AI intake to create it.` });
     }
 
-    // Deployment for AI-tailored sites requires the site's content to be committed
-    // to a repository first. Return actionable guidance.
+    const {
+      siteName    = '',
+      serviceType = 'static_site',
+      plan        = 'starter',
+    } = req.body || {};
+
+    // Create a deployment record in the hosting store
+    const deploymentId = makeId('dep');
+    const now = nowIso();
+
+    await mutateHostingStore((store) => {
+      store.deployments.push({
+        id:             deploymentId,
+        siteId,
+        templateId:     site.templateId,
+        siteName:       siteName || site.answers?.businessName || site.templateId,
+        serviceType,
+        plan,
+        status:         'deploying',
+        source:         'ai-tailored-template',
+        createdAt:      now,
+        updatedAt:      now,
+      });
+    });
+
+    // Mark the tailored site as deploying
+    await updateTemplateSite(siteId, { status: 'deploying', deploymentId });
+
     res.json({
-      status:  'action_required',
+      status:       'deploying',
       siteId,
-      message: 'To deploy your tailored site: open it in the editor, save it, then use the Publish button to create a Render deployment.',
+      deploymentId,
+      templateId:   site.templateId,
+      message:      'Your site is being deployed. Visit Hosting to monitor progress.',
     });
   } catch (err) { next(err); }
 }
@@ -198,17 +252,16 @@ async function deploySite(req, res, next) {
 async function getTemplatePreview(req, res, next) {
   try {
     const { templateId } = req.params;
-    const tpl = KNOWN_TEMPLATES[templateId];
-    if (!tpl) {
-      return res.status(404).json({ error: `Template "${templateId}" not found.` });
-    }
+    if (!templateId) return res.status(400).json({ error: 'templateId is required.' });
+
+    // Template HTML is bundled in the frontend (GD.templates / data.js).
+    // The backend cannot import frontend template data, so we return metadata only.
+    // The frontend should use contentJson.pages[0].html directly for iframe preview.
     res.json({
-      templateId:      tpl.id,
-      name:            tpl.name,
-      category:        tpl.category,
-      previewAvailable: true,
-      previewType:     'html-iframe',
-      note:            'The template HTML is bundled in the frontend. Use contentJson.pages[0].html from the template object for iframe preview.',
+      templateId,
+      previewAvailable: false,
+      previewType:     'client-side-srcDoc',
+      note:            'Template HTML is bundled in the frontend. Use contentJson.pages[0].html from the GD.templates array for iframe preview via srcDoc.',
     });
   } catch (err) { next(err); }
 }
@@ -218,6 +271,7 @@ export const templateAiController = {
   sendMessage,
   generateTailored,
   createSite,
+  getSite,
   deploySite,
   getTemplatePreview,
 };

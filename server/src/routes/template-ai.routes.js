@@ -7,6 +7,7 @@ router.post('/intake/start',            templateAiController.startIntake);
 router.post('/intake/message',          templateAiController.sendMessage);
 router.post('/generate',                templateAiController.generateTailored);
 router.post('/sites',                   templateAiController.createSite);
+router.get('/sites/:siteId',            templateAiController.getSite);
 router.post('/sites/:siteId/deploy',    templateAiController.deploySite);
 router.get('/templates/:templateId/preview', templateAiController.getTemplatePreview);
 

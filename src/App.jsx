@@ -169,7 +169,7 @@ export default function App() {
       case "builder-roxanne":   return <BuilderRoxanne navigate={navigate} />;
       case "builder-import":    return <BuilderImport mode={route.params?.mode || "github"} navigate={navigate} />;
       case "builder-ai-intake":              return <BuilderAiIntake templateId={route.params?.templateId || ""} templateType={route.params?.templateType || "html"} navigate={navigate} />;
-      case "builder-deployment-settings":    return <BuilderDeploymentSettings templateId={route.params?.templateId || ""} templateType={route.params?.templateType || "html"} navigate={navigate} />;
+      case "builder-deployment-settings":    return <BuilderDeploymentSettings siteId={route.params?.siteId || null} templateId={route.params?.templateId || ""} templateType={route.params?.templateType || "html"} navigate={navigate} />;
       case "builder-editor":                 return <BuilderEditor id={route.params?.id} siteId={route.params?.siteId} navigate={navigate} />;
       case "analytics":         return <SimplePage title="Analytics" body="Cross-project analytics — coming up next." />;
       case "activity":          return <ActivityPage />;
