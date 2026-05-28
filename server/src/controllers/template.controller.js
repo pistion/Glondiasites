@@ -42,7 +42,19 @@ const TemplateController = {
   },
 
   getTemplatePreview: async (req, res) => {
-    res.ok({ previewUrl: `https://glondia.app/previews/${req.params.templateId}.jpg` });
+    const tpl = TEMPLATES.find((t) => t.id === req.params.templateId);
+    if (!tpl) return res.status(404).json({ error: 'Template not found.' });
+    // Return real template metadata. Actual HTML is bundled on the frontend
+    // in src/templates/html/ and rendered via sandboxed iframe.
+    res.ok({
+      templateId:      tpl.id,
+      name:            tpl.name,
+      category:        tpl.category,
+      tagline:         tpl.tagline,
+      previewAvailable: true,
+      previewType:     'html-iframe',
+      note:            'Template HTML is available in the frontend bundle at contentJson.pages[n].html.',
+    });
   },
 };
 

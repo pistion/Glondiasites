@@ -962,7 +962,7 @@ export function StorefrontModal({ template, onClose, onUse }) {
           </button>
           {onUse && (
             <button className="btn btn-primary" onClick={() => onUse(template)}>
-              Use this template →
+              Host this template →
             </button>
           )}
           <button className="btn btn-sm btn-ghost" onClick={onClose} title="Close (Esc)">✕</button>

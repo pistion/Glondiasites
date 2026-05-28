@@ -236,6 +236,126 @@ function TplThumb({ tpl }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// TemplateCardPreview — scaled real iframe thumbnail for HTML templates.
+// Renders the first page of contentJson.pages inside a sandboxed iframe,
+// scaled down to fit the card thumbnail slot.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function TemplateCardPreview({ tpl }) {
+  const iframeRef = React.useRef(null);
+  const pages = Array.isArray(tpl?.contentJson?.pages) ? tpl.contentJson.pages : [];
+  const firstPage = pages[0];
+
+  React.useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe || !firstPage?.html) return;
+    const doc = iframe.contentDocument || iframe.contentWindow?.document;
+    if (!doc) return;
+    doc.open();
+    doc.write(firstPage.html);
+    doc.close();
+  }, [firstPage?.html]);
+
+  if (!firstPage?.html) return <TplThumb tpl={tpl} />;
+
+  return (
+    <iframe
+      ref={iframeRef}
+      sandbox="allow-scripts"
+      style={{
+        width: '900px',
+        height: '600px',
+        border: 'none',
+        transform: 'scale(0.245)',
+        transformOrigin: 'top left',
+        pointerEvents: 'none',
+        display: 'block',
+      }}
+      title={`${tpl.name} preview`}
+    />
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TemplatePreviewModal — full-screen overlay with real iframe preview of an
+// HTML template and a "Host this template" CTA that leads to AI intake.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function TemplatePreviewModal({ template, onClose, onHost }) {
+  const pages = Array.isArray(template?.contentJson?.pages) ? template.contentJson.pages : [];
+  const [activePage, setActivePage] = useStateB(pages[0] || null);
+  const iframeRef = React.useRef(null);
+
+  React.useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe || !activePage?.html) return;
+    const doc = iframe.contentDocument || iframe.contentWindow?.document;
+    if (!doc) return;
+    doc.open();
+    doc.write(activePage.html);
+    doc.close();
+  }, [activePage?.html]);
+
+  React.useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
+
+  return (
+    <div
+      className="tpl-preview-modal-backdrop"
+      onClick={onClose}
+    >
+      {/* Header bar */}
+      <div
+        className="tpl-preview-modal-header"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button className="btn btn-icon btn-ghost" onClick={onClose} title="Close (Esc)">
+          <ICN.X size={16} />
+        </button>
+        <div style={{ fontWeight: 600, fontSize: 15 }}>{template.name}</div>
+        {template.tagline && (
+          <div className="muted" style={{ fontSize: 13 }}>{template.tagline}</div>
+        )}
+
+        {/* Page selector */}
+        {pages.length > 1 && (
+          <div style={{ display: 'flex', gap: 6, marginLeft: 16 }}>
+            {pages.map((page, i) => (
+              <button
+                key={i}
+                className={`btn btn-sm ${activePage === page ? 'btn-primary' : 'btn-ghost'}`}
+                onClick={() => setActivePage(page)}
+              >
+                {page.title || `Page ${i + 1}`}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div style={{ flex: 1 }} />
+
+        <button className="btn btn-primary" onClick={() => onHost(template)}>
+          <ICN.Rocket size={14} /> Host this template
+        </button>
+      </div>
+
+      {/* Full iframe preview */}
+      <div className="tpl-preview-modal-body" onClick={(e) => e.stopPropagation()}>
+        <iframe
+          ref={iframeRef}
+          sandbox="allow-scripts allow-same-origin"
+          style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
+          title={`${template.name} full preview`}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE GALLERY
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -702,19 +822,29 @@ export function BuilderTemplates({ navigate }) {
   const [cat, setCat] = useStateB("All");
   const [sfCat, setSfCat] = useStateB("All");
   const [previewTpl, setPreviewTpl] = useStateB(null);
+  const [genPreviewTpl, setGenPreviewTpl] = useStateB(null);
 
   // Storefront categories
   const sfCats = ["All", ...Array.from(new Set(STOREFRONT_TEMPLATES.map(t => t.category)))];
   const sfFiltered = sfCat === "All" ? STOREFRONT_TEMPLATES : STOREFRONT_TEMPLATES.filter(t => t.category === sfCat);
 
-  // General templates
-  const cats = ["All", ...Array.from(new Set(templates.map(t => t.category)))];
-  const filtered = cat === "All" ? templates : templates.filter(t => t.category === cat);
+  // General templates — only show those with real HTML content (hides skeleton-only stubs)
+  const htmlTemplates = templates.filter(t => t.contentJson?._source === 'html-template');
+  const cats = ["All", ...Array.from(new Set(htmlTemplates.map(t => t.category)))];
+  const filtered = cat === "All" ? htmlTemplates : htmlTemplates.filter(t => t.category === cat);
 
-  const handleUseStorefront = (t) => {
+  // "Host this template" — routes through AI intake before editor/deploy
+  const handleHostTemplate = (t) => {
     setPreviewTpl(null);
-    navigate({ view: "builder-editor", params: { id: t.id } });
+    setGenPreviewTpl(null);
+    navigate({
+      view:   'builder-ai-intake',
+      params: { templateId: t.id, templateType: t.contentJson?._source === 'html-template' ? 'html' : 'storefront' },
+    });
   };
+
+  // Keep old alias for storefront flow
+  const handleUseStorefront = handleHostTemplate;
 
   return (
     <>
@@ -774,8 +904,8 @@ export function BuilderTemplates({ navigate }) {
                   </button>
                   <button className="btn btn-outline"
                     style={{ background: "rgba(255,255,255,.92)", color: "var(--text)" }}
-                    onClick={() => handleUseStorefront(t)}>
-                    Use template
+                    onClick={() => setPreviewTpl(t)}>
+                    View template
                   </button>
                 </div>
                 {/* Badges */}
@@ -806,8 +936,8 @@ export function BuilderTemplates({ navigate }) {
                 </div>
                 <div className="row" style={{ gap: 8, marginTop: 10 }}>
                   <button className="btn btn-sm btn-primary" style={{ flex: 1 }}
-                    onClick={() => handleUseStorefront(t)}>
-                    Use {t.name} <ICN.ArrowRight size={12} />
+                    onClick={() => setPreviewTpl(t)}>
+                    <ICN.Eye size={12} /> Preview {t.name}
                   </button>
                   <button className="btn btn-sm btn-outline" title="Full preview"
                     onClick={() => setPreviewTpl(t)}>
@@ -888,38 +1018,55 @@ export function BuilderTemplates({ navigate }) {
         ) : (
           <div className="tpl-grid">
             {filtered.map(t => (
-              <div className="tpl-card" key={t.id}>
-                <div className="tpl-thumb"><TplThumb tpl={t} /></div>
+              <div
+                className="tpl-card tpl-card--clickable"
+                key={t.id}
+                onClick={() => setGenPreviewTpl(t)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => e.key === 'Enter' && setGenPreviewTpl(t)}
+              >
+                {/* Real iframe preview for HTML templates */}
+                <div className="tpl-thumb tpl-thumb--iframe">
+                  <TemplateCardPreview tpl={t} />
+                </div>
                 <div className="tpl-body">
                   <div className="row between">
                     <h4>{t.name}</h4>
                     <span className="faint" style={{ fontSize: 11 }}>{t.category}</span>
                   </div>
                   <p className="muted" style={{ margin: 0, fontSize: 13 }}>{t.tagline}</p>
-                  {t.contentJson?._source === 'html-template' ? (
-                    <div className="tag-row">
-                      <span className="ttag" style={{ background: 'var(--accent-soft)', color: 'var(--accent-ink)', border: '1px solid var(--accent)' }}>HTML</span>
-                      {Array.isArray(t.contentJson?.pages) && (
-                        <span className="ttag">{t.contentJson.pages.length} pages</span>
-                      )}
-                      <span className="ttag">AI editable</span>
-                    </div>
-                  ) : (
-                    <div className="tag-row">
-                      <span className="ttag">Home</span>
-                      <span className="ttag">About</span>
-                      <span className="ttag">Contact</span>
-                    </div>
-                  )}
+                  <div className="tag-row">
+                    <span className="ttag" style={{ background: 'var(--accent-soft)', color: 'var(--accent-ink)', border: '1px solid var(--accent)' }}>HTML</span>
+                    {Array.isArray(t.contentJson?.pages) && (
+                      <span className="ttag">{t.contentJson.pages.length} {t.contentJson.pages.length === 1 ? 'page' : 'pages'}</span>
+                    )}
+                    <span className="ttag">AI ready</span>
+                  </div>
                   <div className="row" style={{ gap: 8, marginTop: 12 }}>
-                    <button className="btn btn-sm btn-primary" style={{ flex: 1 }}
-                            onClick={() => navigate({ view: "builder-editor", params: { id: t.id } })}>
-                      Use {t.name} <ICN.ArrowRight size={12} />
+                    <button
+                      className="btn btn-sm btn-primary"
+                      style={{ flex: 1 }}
+                      onClick={(e) => { e.stopPropagation(); setGenPreviewTpl(t); }}
+                    >
+                      <ICN.Eye size={12} /> Preview {t.name}
                     </button>
-                    <button className="btn btn-sm btn-outline" title="Preview"><ICN.Eye size={14} /></button>
+                    <button
+                      className="btn btn-sm btn-outline"
+                      title="Preview template"
+                      onClick={(e) => { e.stopPropagation(); setGenPreviewTpl(t); }}
+                    >
+                      <ICN.Eye size={14} />
+                    </button>
                     {TEMPLATES_REPO && (
-                      <a href={`${TEMPLATES_REPO}/tree/main/${t.id}`} target="_blank" rel="noopener noreferrer"
-                         className="btn btn-sm btn-ghost" title="View source on GitHub">
+                      <a
+                        href={`${TEMPLATES_REPO}/tree/main/${t.id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="btn btn-sm btn-ghost"
+                        title="View source on GitHub"
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         <ICN.Git size={14} />
                       </a>
                     )}
@@ -931,12 +1078,21 @@ export function BuilderTemplates({ navigate }) {
         )}
       </div>
 
-      {/* Full-screen preview modal */}
+      {/* Storefront full-screen preview modal */}
       {previewTpl && (
         <StorefrontModal
           template={previewTpl}
           onClose={() => setPreviewTpl(null)}
           onUse={handleUseStorefront}
+        />
+      )}
+
+      {/* General / HTML template full-screen preview modal */}
+      {genPreviewTpl && (
+        <TemplatePreviewModal
+          template={genPreviewTpl}
+          onClose={() => setGenPreviewTpl(null)}
+          onHost={handleHostTemplate}
         />
       )}
     </>

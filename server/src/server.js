@@ -23,6 +23,7 @@ import siteRoutes from './routes/site.routes.js';
 import publicSalesRoutes from './routes/public-sales.routes.js';
 import commerceRoutes from './routes/commerce.routes.js';
 import templateRoutes from './routes/template.routes.js';
+import templateAiRoutes from './routes/template-ai.routes.js';
 import eventsRoutes from './routes/events.routes.js';
 import analyticsRoutes from './routes/analytics.routes.js';
 import billingRoutes from './routes/billing.routes.js';
@@ -521,6 +522,7 @@ app.use('/api/v1/public', publicRoutes);
 app.use('/api/v1/public/sites', publicSalesRoutes);
 app.use('/api/v1/domains', domainPublicRoutes);
 app.use('/api/v1/templates', templateRoutes);
+app.use('/api/template-ai', templateAiRoutes);
 app.use('/api/v1/events', eventsRoutes);
 
 // Auth
