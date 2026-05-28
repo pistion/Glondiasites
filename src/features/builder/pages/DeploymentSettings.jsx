@@ -6,21 +6,9 @@ import { createBuilderSite, publishBuilderSite, createRenderDeployment, getStore
 import { getTailoredTemplateSite, deployTailoredTemplate } from '../../../api/template-ai.js';
 
 const PLAN_COPY = {
-  starter: {
-    label: 'Starter',
-    estimate: '$0/mo while available on free/static hosting',
-    note: 'Best for early preview sites and simple static launches.',
-  },
-  standard: {
-    label: 'Standard',
-    estimate: 'Estimated paid hosting plan',
-    note: 'Use when traffic, builds, or uptime needs grow.',
-  },
-  pro: {
-    label: 'Pro',
-    estimate: 'Estimated higher-capacity hosting plan',
-    note: 'Use for production sites that need more resources.',
-  },
+  starter: { label: 'Starter', estimate: '$0/mo while available on free/static hosting', note: 'Best for early preview sites and simple static launches.' },
+  standard: { label: 'Standard', estimate: 'Estimated paid hosting plan', note: 'Use when traffic, builds, or uptime needs grow.' },
+  pro: { label: 'Pro', estimate: 'Estimated higher-capacity hosting plan', note: 'Use for production sites that need more resources.' },
 };
 
 function DeployingOverlay({ siteName }) {
@@ -31,10 +19,8 @@ function DeployingOverlay({ siteName }) {
           <ICN.Rocket size={24} />
         </div>
         <h2 style={{ margin: '0 0 8px' }}>Uploading to Render</h2>
-        <p className="muted" style={{ margin: 0 }}>Creating deployment for {siteName || 'your site'} and preparing the Hosting dashboard.</p>
-        <div className="ai-intake-progress" style={{ marginTop: 20 }}>
-          <div className="ai-intake-progress-bar" style={{ width: '72%' }} />
-        </div>
+        <p className="muted" style={{ margin: 0 }}>Preparing {siteName || 'your site'}, generating files, and opening the Hosting dashboard.</p>
+        <div className="ai-intake-progress" style={{ marginTop: 20 }}><div className="ai-intake-progress-bar" style={{ width: '72%' }} /></div>
       </div>
     </div>
   );
@@ -49,6 +35,10 @@ export function BuilderDeploymentSettings({ siteId, templateId, templateType, na
   const [plan, setPlan] = useStateB('starter');
   const [environment, setEnvironment] = useStateB('production');
   const [subdomain, setSubdomain] = useStateB('');
+  const [repoUrl, setRepoUrl] = useStateB('');
+  const [branch, setBranch] = useStateB('main');
+  const [rootDirectory, setRootDirectory] = useStateB('');
+  const [showAdvanced, setShowAdvanced] = useStateB(false);
   const [deploying, setDeploying] = useStateB(false);
   const [deployError, setDeployError] = useStateB(null);
   const [deployMsg, setDeployMsg] = useStateB(null);
@@ -77,6 +67,7 @@ export function BuilderDeploymentSettings({ siteId, templateId, templateType, na
   const selectedPlan = PLAN_COPY[plan] || PLAN_COPY.starter;
   const buildCommand = 'npm install && npm run build';
   const publishDirectory = 'dist';
+  const hasSourceRepo = Boolean(repoUrl.trim());
 
   const handleOpenPreview = () => {
     const html = previewPage?.html || tailoredPages[0]?.html;
@@ -112,6 +103,9 @@ export function BuilderDeploymentSettings({ siteId, templateId, templateType, na
           buildCommand,
           publishDirectory,
           sourceReference: 'roxanne-ai-tailored-template',
+          repoUrl: repoUrl.trim() || undefined,
+          branch: branch.trim() || 'main',
+          rootDirectory: rootDirectory.trim() || undefined,
         });
       } else {
         const site = await createBuilderSite({ name: siteName.trim(), templateId: templateId || null });
@@ -124,13 +118,15 @@ export function BuilderDeploymentSettings({ siteId, templateId, templateType, na
           serviceType,
           sourceReference: 'builder',
           environment,
+          repoUrl: repoUrl.trim() || undefined,
+          branch: branch.trim() || 'main',
+          rootDirectory: rootDirectory.trim() || undefined,
         });
       }
-      setDeployMsg('Deployment started. Redirecting to Hosting settings...');
+
+      setDeployMsg(deployment?.render?.attempted ? 'Render deployment started. Redirecting to Hosting settings...' : 'Generated site prepared. Redirecting to Hosting settings...');
       if (deployment?.deploymentId) {
-        window.setTimeout(() => {
-          navigate({ view: 'hosting-detail', params: { id: deployment.deploymentId } });
-        }, 700);
+        window.setTimeout(() => navigate({ view: 'hosting-detail', params: { id: deployment.deploymentId } }), 700);
       }
     } catch (err) {
       setDeployError(err.message || 'Deployment failed. Please try again.');
@@ -144,16 +140,12 @@ export function BuilderDeploymentSettings({ siteId, templateId, templateType, na
 
       <div className="page-head">
         <div>
-          <a className="page-eyebrow" href="#" onClick={(e) => { e.preventDefault(); navigate({ view: 'builder-ai-intake', params: { templateId, templateType } }); }}>
-            Site builder / RoxanneAI setup
-          </a>
+          <a className="page-eyebrow" href="#" onClick={(e) => { e.preventDefault(); navigate({ view: 'builder-ai-intake', params: { templateId, templateType } }); }}>Site builder / RoxanneAI setup</a>
           <h1>Render deployment settings</h1>
           <p className="sub">Review the generated site, confirm hosting settings, preview in a new tab, then deploy.</p>
         </div>
         <div className="actions">
-          <button className="btn btn-outline" onClick={handleOpenPreview} disabled={tailoredPages.length === 0}>
-            <ICN.ExternalLink size={14} /> Preview site
-          </button>
+          <button className="btn btn-outline" onClick={handleOpenPreview} disabled={tailoredPages.length === 0}><ICN.ExternalLink size={14} /> Preview site</button>
           <button className="btn btn-outline" onClick={() => navigate({ view: 'builder-templates' })}>← Templates</button>
         </div>
       </div>
@@ -186,14 +178,8 @@ export function BuilderDeploymentSettings({ siteId, templateId, templateType, na
           </div>
 
           <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div>
-              <div className="label">Build command</div>
-              <input className="input mono" value={buildCommand} readOnly />
-            </div>
-            <div>
-              <div className="label">Publish directory</div>
-              <input className="input mono" value={publishDirectory} readOnly />
-            </div>
+            <div><div className="label">Build command</div><input className="input mono" value={buildCommand} readOnly /></div>
+            <div><div className="label">Publish directory</div><input className="input mono" value={publishDirectory} readOnly /></div>
           </div>
 
           <div>
@@ -202,6 +188,30 @@ export function BuilderDeploymentSettings({ siteId, templateId, templateType, na
               <option value="production">Production</option>
               <option value="preview">Preview</option>
             </select>
+          </div>
+
+          <div className="card" style={{ padding: 14, background: 'var(--bg-deep)', fontSize: 13 }}>
+            <div className="row between" style={{ gap: 12 }}>
+              <div>
+                <div style={{ fontWeight: 600 }}>Render source repository</div>
+                <div className="muted" style={{ marginTop: 3 }}>
+                  Optional here. If blank, backend uses <span className="mono">RENDER_GENERATED_SITES_REPO_URL</span>. If neither exists, the site is generated and saved, but Render handoff is skipped with clear logs.
+                </div>
+              </div>
+              <button type="button" className="btn btn-sm btn-outline" onClick={() => setShowAdvanced(!showAdvanced)}>{showAdvanced ? 'Hide' : 'Configure'}</button>
+            </div>
+            {showAdvanced && (
+              <div style={{ display: 'grid', gap: 12, marginTop: 14 }}>
+                <div>
+                  <div className="label">Repository URL</div>
+                  <input className="input" value={repoUrl} onChange={(e) => setRepoUrl(e.target.value)} placeholder="https://github.com/your-org/generated-sites" />
+                </div>
+                <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div><div className="label">Branch</div><input className="input" value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="main" /></div>
+                  <div><div className="label">Root directory</div><input className="input" value={rootDirectory} onChange={(e) => setRootDirectory(e.target.value)} placeholder="optional/generated/site/path" /></div>
+                </div>
+              </div>
+            )}
           </div>
 
           <div>
@@ -232,13 +242,7 @@ export function BuilderDeploymentSettings({ siteId, templateId, templateType, na
           <div className="deploy-preview-column">
             <div className="deploy-preview-header">
               <div style={{ fontWeight: 600, fontSize: 13 }}>Generated site preview</div>
-              {tailoredPages.length > 1 && (
-                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                  {tailoredPages.map((page, i) => (
-                    <button key={i} className={`btn btn-sm ${previewPage === page ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setPreviewPage(page)}>{page.title || `Page ${i + 1}`}</button>
-                  ))}
-                </div>
-              )}
+              {tailoredPages.length > 1 && <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>{tailoredPages.map((page, i) => <button key={i} className={`btn btn-sm ${previewPage === page ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setPreviewPage(page)}>{page.title || `Page ${i + 1}`}</button>)}</div>}
             </div>
             <iframe sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox" srcDoc={previewPage?.html || tailoredPages[0]?.html || '<!doctype html><html><body></body></html>'} className="deploy-preview-iframe" title="Tailored site preview" />
           </div>
@@ -248,11 +252,11 @@ export function BuilderDeploymentSettings({ siteId, templateId, templateType, na
           <div className="card" style={{ padding: 20 }}>
             <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 14 }}>What happens when you click Deploy</div>
             {[
-              'Glondia sends the generated site build data to the backend',
-              'Backend creates the Render deployment request',
-              'Render installs dependencies and builds the Vite site',
-              'You are redirected to Hosting settings',
-              'Deploy logs and service settings appear in the Hosting tab',
+              'Backend saves the generated Vite React site files',
+              hasSourceRepo ? 'Frontend sends your selected Render source repo to the backend' : 'Backend uses env Render source repo if configured',
+              'Render API handoff starts when credentials and source repo are present',
+              'You are redirected to Hosting settings either way',
+              'Hosting logs show whether Render started or what configuration is missing',
             ].map((step, i) => (
               <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 10, fontSize: 13 }}>
                 <div style={{ width: 22, height: 22, borderRadius: 999, flexShrink: 0, background: 'var(--accent-soft)', color: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700 }}>{i + 1}</div>
@@ -263,7 +267,7 @@ export function BuilderDeploymentSettings({ siteId, templateId, templateType, na
 
           <div className="card" style={{ padding: 16, fontSize: 13 }}>
             <div style={{ fontWeight: 600, marginBottom: 6 }}>Preview before deploying</div>
-            <div className="muted" style={{ marginBottom: 12 }}>Open the generated customized site in a new browser tab before creating the Render deployment.</div>
+            <div className="muted" style={{ marginBottom: 12 }}>Open the generated customized site in a new browser tab before creating the Render deployment record.</div>
             <button className="btn btn-sm btn-outline" onClick={handleOpenPreview} disabled={tailoredPages.length === 0}><ICN.ExternalLink size={14} /> Preview site</button>
           </div>
 
