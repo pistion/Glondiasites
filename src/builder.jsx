@@ -242,26 +242,15 @@ function TplThumb({ tpl }) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function TemplateCardPreview({ tpl }) {
-  const iframeRef = React.useRef(null);
   const pages = Array.isArray(tpl?.contentJson?.pages) ? tpl.contentJson.pages : [];
   const firstPage = pages[0];
-
-  React.useEffect(() => {
-    const iframe = iframeRef.current;
-    if (!iframe || !firstPage?.html) return;
-    const doc = iframe.contentDocument || iframe.contentWindow?.document;
-    if (!doc) return;
-    doc.open();
-    doc.write(firstPage.html);
-    doc.close();
-  }, [firstPage?.html]);
 
   if (!firstPage?.html) return <TplThumb tpl={tpl} />;
 
   return (
     <iframe
-      ref={iframeRef}
-      sandbox="allow-scripts"
+      sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
+      srcDoc={firstPage.html}
       style={{
         width: '900px',
         height: '600px',
@@ -284,17 +273,6 @@ function TemplateCardPreview({ tpl }) {
 function TemplatePreviewModal({ template, onClose, onHost }) {
   const pages = Array.isArray(template?.contentJson?.pages) ? template.contentJson.pages : [];
   const [activePage, setActivePage] = useStateB(pages[0] || null);
-  const iframeRef = React.useRef(null);
-
-  React.useEffect(() => {
-    const iframe = iframeRef.current;
-    if (!iframe || !activePage?.html) return;
-    const doc = iframe.contentDocument || iframe.contentWindow?.document;
-    if (!doc) return;
-    doc.open();
-    doc.write(activePage.html);
-    doc.close();
-  }, [activePage?.html]);
 
   React.useEffect(() => {
     const handler = (e) => { if (e.key === 'Escape') onClose(); };
@@ -345,8 +323,8 @@ function TemplatePreviewModal({ template, onClose, onHost }) {
       {/* Full iframe preview */}
       <div className="tpl-preview-modal-body" onClick={(e) => e.stopPropagation()}>
         <iframe
-          ref={iframeRef}
-          sandbox="allow-scripts allow-same-origin"
+          sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
+          srcDoc={activePage?.html || '<!doctype html><html><body></body></html>'}
           style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
           title={`${template.name} full preview`}
         />
@@ -1131,21 +1109,9 @@ function HtmlTemplateEditor({ allPages, currentPage, onSwitchPage, onHtmlChange,
   const [loading, setLoading] = useStateB(false);
   const [history, setHistory] = useStateB([]);
   const [error, setError] = useStateB(null);
-  const iframeRef = React.useRef(null);
 
   const html = currentPage?.content?.html || '';
   const pagePath = currentPage?.path || '/';
-
-  // Write HTML into the sandboxed iframe
-  React.useEffect(() => {
-    const iframe = iframeRef.current;
-    if (!iframe || !html) return;
-    const doc = iframe.contentDocument || iframe.contentWindow?.document;
-    if (!doc) return;
-    doc.open();
-    doc.write(html);
-    doc.close();
-  }, [html]);
 
   const handleAiEdit = async (e) => {
     e.preventDefault();
@@ -1197,8 +1163,8 @@ function HtmlTemplateEditor({ allPages, currentPage, onSwitchPage, onHtmlChange,
           </div>
         )}
         <iframe
-          ref={iframeRef}
-          sandbox="allow-scripts allow-same-origin"
+          sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
+          srcDoc={html || '<!doctype html><html><body></body></html>'}
           style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
           title="Template preview"
         />

@@ -1,6 +1,6 @@
 // builder-ai-intake.jsx — AI-guided website setup chat before deployment.
 // Flow: Template gallery → preview modal → "Host this template" → here → editor/deploy.
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react'; // useRef kept for chatEndRef / inputRef
 import { ICN } from './icons';
 import { GD } from './data';
 import { generateTailoredTemplate } from './api/template-ai.js';
@@ -39,15 +39,6 @@ function isSkip(value) {
 /** Scaled iframe showing template HTML read-only */
 function TailoredPreviewPane({ pages, initialPage }) {
   const [activePage, setActivePage] = useState(initialPage || pages[0] || null);
-  const iframeRef = useRef(null);
-
-  useEffect(() => {
-    const iframe = iframeRef.current;
-    if (!iframe || !activePage?.html) return;
-    const doc = iframe.contentDocument || iframe.contentWindow?.document;
-    if (!doc) return;
-    doc.open(); doc.write(activePage.html); doc.close();
-  }, [activePage?.html]);
 
   return (
     <div className="ai-intake-preview-pane">
@@ -65,8 +56,8 @@ function TailoredPreviewPane({ pages, initialPage }) {
         </div>
       )}
       <iframe
-        ref={iframeRef}
-        sandbox="allow-scripts allow-same-origin"
+        sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
+        srcDoc={activePage?.html || '<!doctype html><html><body></body></html>'}
         className="ai-intake-preview-iframe"
         title="Tailored site preview"
       />
