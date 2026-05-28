@@ -1,10 +1,138 @@
-// BuilderGallery.jsx — compatibility redirect to the real template gallery.
+// BuilderGallery.jsx — guided Site Builder start screen.
 import React from 'react';
+import { ICN } from '../../../icons';
+
+function ChoiceCard({ icon: Icon, eyebrow, title, body, points = [], action, onClick, tone = 'default', disabled = false }) {
+  return (
+    <button
+      type="button"
+      className={`card builder-choice-card builder-choice-card--${tone}`}
+      onClick={disabled ? undefined : onClick}
+      disabled={disabled}
+      style={{
+        textAlign: 'left',
+        padding: 22,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 14,
+        opacity: disabled ? 0.68 : 1,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        minHeight: 260,
+      }}
+    >
+      <div className="row between" style={{ alignItems: 'flex-start', gap: 12 }}>
+        <div style={{ width: 44, height: 44, borderRadius: 14, background: 'var(--accent-soft)', color: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Icon size={20} />
+        </div>
+        {disabled ? <span className="badge warn"><span className="dot" />Next</span> : <span className="badge info"><span className="dot" />Ready</span>}
+      </div>
+
+      <div>
+        <div className="page-eyebrow" style={{ marginBottom: 6 }}>{eyebrow}</div>
+        <h2 style={{ margin: 0, fontSize: 20 }}>{title}</h2>
+        <p className="muted" style={{ margin: '8px 0 0', fontSize: 13, lineHeight: 1.55 }}>{body}</p>
+      </div>
+
+      {points.length > 0 && (
+        <div style={{ display: 'grid', gap: 7, marginTop: 'auto' }}>
+          {points.map((point) => (
+            <div key={point} className="row" style={{ gap: 8, fontSize: 13, color: 'var(--text-muted)' }}>
+              <ICN.CheckCircle size={14} style={{ color: 'var(--accent)' }} />
+              <span>{point}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className={`btn ${disabled ? 'btn-outline' : 'btn-primary'}`} style={{ justifyContent: 'center', marginTop: 6 }}>
+        {action} {!disabled && <ICN.ArrowRight size={14} />}
+      </div>
+    </button>
+  );
+}
 
 export function BuilderGallery({ navigate }) {
-  React.useEffect(() => {
-    navigate({ view: 'builder-templates' });
-  }, [navigate]);
+  return (
+    <>
+      <div className="page-head">
+        <div>
+          <div className="page-eyebrow">Site builder</div>
+          <h1>How do you want to create your website?</h1>
+          <p className="sub">
+            Start with RoxanneAI, choose a real template, or import an existing project. This screen guides clients before they enter the build flow.
+          </p>
+        </div>
+      </div>
 
-  return null;
+      <div className="card" style={{ padding: '14px 16px', marginBottom: 18 }}>
+        <div className="row" style={{ gap: 10, alignItems: 'flex-start' }}>
+          <div style={{ width: 34, height: 34, borderRadius: 999, background: 'var(--accent-soft)', color: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <ICN.Sparkles size={16} />
+          </div>
+          <div>
+            <div style={{ fontWeight: 700 }}>Recommended client path</div>
+            <div className="muted" style={{ fontSize: 13, marginTop: 3 }}>
+              New clients should usually start with templates. Developers can import from GitHub. ZIP upload is shown as the next import method to finish.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
+        <ChoiceCard
+          icon={ICN.Sparkles}
+          eyebrow="AI first"
+          title="Create with RoxanneAI"
+          body="Start from a guided AI website session. RoxanneAI collects the business idea first, then helps route the client into the right website build path."
+          points={['Guided business questions', 'Good for clients with no content', 'Can connect to templates next']}
+          action="Start with RoxanneAI"
+          onClick={() => navigate({ view: 'builder-roxanne' })}
+          tone="ai"
+        />
+
+        <ChoiceCard
+          icon={ICN.Layers}
+          eyebrow="Template first"
+          title="Choose templates"
+          body="Preview real parent templates like Pulse Works and Forge, then use RoxanneAI to customize the copied version for the client."
+          points={['Shows only real templates', 'Preview before AI editing', 'Best current production flow']}
+          action="Choose a template"
+          onClick={() => navigate({ view: 'builder-templates' })}
+          tone="templates"
+        />
+
+        <div className="card" style={{ padding: 22, display: 'flex', flexDirection: 'column', gap: 14, minHeight: 260 }}>
+          <div className="row between" style={{ alignItems: 'flex-start', gap: 12 }}>
+            <div style={{ width: 44, height: 44, borderRadius: 14, background: 'var(--accent-soft)', color: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <ICN.Git size={20} />
+            </div>
+            <span className="badge info"><span className="dot" />Import</span>
+          </div>
+
+          <div>
+            <div className="page-eyebrow" style={{ marginBottom: 6 }}>Bring your own project</div>
+            <h2 style={{ margin: 0, fontSize: 20 }}>Import ZIP or GitHub</h2>
+            <p className="muted" style={{ margin: '8px 0 0', fontSize: 13, lineHeight: 1.55 }}>
+              Pull an existing project into Glondia. GitHub import is available now; ZIP upload is visible here as the next upload method to complete.
+            </p>
+          </div>
+
+          <div style={{ display: 'grid', gap: 7, marginTop: 'auto' }}>
+            <div className="row" style={{ gap: 8, fontSize: 13, color: 'var(--text-muted)' }}><ICN.CheckCircle size={14} style={{ color: 'var(--accent)' }} />GitHub repository import exists</div>
+            <div className="row" style={{ gap: 8, fontSize: 13, color: 'var(--text-muted)' }}><ICN.AlertCircle size={14} style={{ color: 'var(--warning)' }} />ZIP upload needs final check</div>
+            <div className="row" style={{ gap: 8, fontSize: 13, color: 'var(--text-muted)' }}><ICN.CheckCircle size={14} style={{ color: 'var(--accent)' }} />Render settings are collected</div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 6 }}>
+            <button className="btn btn-primary" onClick={() => navigate({ view: 'builder-import', params: { mode: 'github' } })}>
+              <ICN.Git size={14} /> GitHub
+            </button>
+            <button className="btn btn-outline" onClick={() => navigate({ view: 'builder-import', params: { mode: 'zip' } })}>
+              <ICN.Box size={14} /> ZIP upload
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
 }
