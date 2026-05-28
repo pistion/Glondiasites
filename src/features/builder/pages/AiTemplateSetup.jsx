@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ICN } from '../../../icons';
 import { GD } from '../../../data';
 import { generateTailoredTemplate, createSiteFromTailoredTemplate } from '../../../api/template-ai.js';
+import './AiTemplateSetup.css';
 
 const QUESTIONS = [
   { key: 'businessName', label: 'Business name', question: "What's your business or website name?" },
