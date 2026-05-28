@@ -93,7 +93,7 @@ export function DashSidebar({ active, navigate }) {
   return (
     <aside className="dash-side">
       <div className="dash-side-head">
-        <Logo compact onClick={() => navigate({ view: "marketing" })} />
+        <Logo compact onClick={() => { window.location.href = "/"; }} />
       </div>
       <nav className="dash-side-nav">
         {DASH_NAV.map((group) => (
@@ -239,7 +239,7 @@ function AuthMenu({ navigate }) {
                 clearAuthSession();
                 setAuth(getStoredAuth());
                 setOpen(false);
-                if (navigate) navigate({ view: 'marketing' });
+                window.location.href = "/";
               }}>
                 Sign out
               </button>
@@ -295,12 +295,12 @@ function AuthMenu({ navigate }) {
 export function PubNavbar({ navigate }) {
   return (
     <nav className="pub-nav">
-      <Logo onClick={() => navigate({ view: "marketing" })} />
+      <Logo onClick={() => { window.location.href = "/"; }} />
       <div className="grow" />
-      <a className="navlink" href="#" onClick={(e) => { e.preventDefault(); navigate({ view: "marketing", anchor: "hosting" }); }}>Hosting</a>
-      <a className="navlink" href="#" onClick={(e) => { e.preventDefault(); navigate({ view: "marketing", anchor: "domains" }); }}>Domains</a>
-      <a className="navlink" href="#" onClick={(e) => { e.preventDefault(); navigate({ view: "marketing", anchor: "builder" }); }}>Site builder</a>
-      <a className="navlink" href="#" onClick={(e) => { e.preventDefault(); navigate({ view: "marketing", anchor: "pricing" }); }}>Pricing</a>
+      <a className="navlink" href="/#hosting">Hosting</a>
+      <a className="navlink" href="/#domains">Domains</a>
+      <a className="navlink" href="/#builder">Site builder</a>
+      <a className="navlink" href="/#pricing">Pricing</a>
       <a className="navlink" href="#">Docs</a>
       <div style={{ width: 10 }} />
       <button className="btn btn-ghost" onClick={() => navigate({ view: "login" })}>Sign in</button>

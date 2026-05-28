@@ -17,7 +17,6 @@ import {
   TweakSelect, 
   TweakButton 
 } from './tweaks-panel';
-import { Marketing } from './marketing';
 import { Overview } from './overview';
 import { HostingList, HostingDetail } from './hosting-control';
 import { DomainsMine, DomainsBuy, DnsEditor } from './domains';
@@ -138,7 +137,6 @@ export default function App() {
     }
   }, []);
 
-  // Marketing has its own nav, scroll to anchor on view change
   useEffectApp(() => { window.scrollTo({ top: 0, behavior: "instant" }); }, [route.view, route.params?.id]);
 
   const navigate = (r) => setRoute(r);
@@ -157,7 +155,6 @@ export default function App() {
     if (isAuthBlocked) return <LoginPage navigate={navigate} />;
 
     switch (route.view) {
-      case "marketing":         return <Marketing navigate={navigate} />;
       case "login":             return authed ? (() => { navigate({ view: 'overview' }); return null; })() : <LoginPage navigate={navigate} />;
       case "signup":            return authed ? (() => { navigate({ view: 'overview' }); return null; })() : <SignupPage navigate={navigate} />;
       case "overview":          return <Overview navigate={navigate} />;
@@ -178,7 +175,9 @@ export default function App() {
       case "vps-hosting":       return <VpsHostingList navigate={navigate} />;
       case "vps-create":        return <VpsCreateWizard navigate={navigate} initialPlan={route.params?.plan || ''} initialPlanType={route.params?.planType || ''} />;
       case "vps-detail":        return <VpsDetail id={route.params?.id} navigate={navigate} />;
-      default:                  return <Marketing navigate={navigate} />;
+      default:
+        window.location.href = "/";
+        return null;
     }
   };
 
@@ -214,7 +213,7 @@ export default function App() {
     }
   })();
 
-  const isFullPageView = route.view === "marketing" || route.view === "login" || route.view === "signup" || isAuthBlocked;
+  const isFullPageView = route.view === "login" || route.view === "signup" || isAuthBlocked;
 
   return (
     <>
@@ -264,7 +263,7 @@ export default function App() {
                      ]}
                      onChange={(v) => setTweak("fontPair", v)} />
         <TweakSection label="Navigate" />
-        <TweakButton label="Jump to…" onClick={() => navigate({ view: "marketing" })}>Marketing</TweakButton>
+        <TweakButton onClick={() => { window.location.href = "/"; }}>Front page</TweakButton>
         <TweakButton onClick={() => navigate({ view: "overview" })}>Dashboard overview</TweakButton>
         <TweakButton onClick={() => navigate({ view: "hosting-list" })}>Hosting projects</TweakButton>
         <TweakButton onClick={() => navigate({ view: "hosting-detail", params: { id: "" } })}>Project detail</TweakButton>

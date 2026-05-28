@@ -195,7 +195,7 @@ export default function LoginPage({ navigate }) {
   return (
     <div style={S.page}>
       <button style={S.back}
-        onClick={() => navigate({ view: 'marketing' })}
+        onClick={() => { window.location.href = "/"; }}
         onMouseEnter={e => e.currentTarget.style.color = '#5BFF8F'}
         onMouseLeave={e => e.currentTarget.style.color = '#4A5550'}>
         ← glondia.co
