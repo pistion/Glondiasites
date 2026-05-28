@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
+    "adm-zip": "^0.5.16",
     "bootstrap": "^5.3.8",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
