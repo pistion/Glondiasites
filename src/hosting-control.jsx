@@ -81,6 +81,48 @@ function WarmingBlock({ app }) { return <div style={{ marginTop: 18, padding: 14
 function FailureBlock({ app }) { return <div style={{ marginTop: 18, padding: 14, border: '1px solid var(--danger)', borderRadius: 'var(--r-sm)', background: 'var(--bg-deep)' }}><div className="row" style={{ gap: 8, color: 'var(--danger)', fontWeight: 700 }}><ICN.AlertCircle size={16} /> Deployment failed</div><div className="muted" style={{ marginTop: 8 }}>{app.errorMessage || 'Review logs and settings, then redeploy.'}</div></div>; }
 function AdminPanel({ app, busy, onSuspend }) { const real = hasRealRenderId(app.renderServiceId); return <div className="card"><h2 style={{ marginTop: 0 }}>Admin controls</h2><div className="kv" style={{ gridTemplateColumns: '140px 1fr', marginBottom: 16 }}><dt>Deployment ID</dt><dd className="mono">{app.deploymentId}</dd><dt>Render service</dt><dd className="mono">{real ? app.renderServiceId : 'Pending configuration'}</dd><dt>Render deploy</dt><dd className="mono">{hasRealRenderId(app.renderDeployId) ? app.renderDeployId : 'Pending'}</dd><dt>Last synced</dt><dd>{formatDate(app.lastRenderSyncedAt)}</dd><dt>Created</dt><dd>{formatDate(app.createdAt)}</dd></div><div style={{ display: 'grid', gap: 10 }}><button className="btn btn-outline" disabled={!real || busy === 'suspend' || app.status === 'suspended'} onClick={onSuspend}><ICN.Power size={14} /> Suspend Site</button></div></div>; }
 function OverviewTab({ app, deploymentId }) { const g = app.generatedSite || {}; const s = app.environmentConfiguration || {}; const root = getRenderSourceRoot(app); return <div className="grid-side"><div style={{ display: 'grid', gap: 16 }}><div className="card"><h2 style={{ marginTop: 0 }}>Hosting app</h2><div className="kv"><dt>Source</dt><dd className="mono">{sourceLabel(app)}</dd><dt>Branch</dt><dd className="mono">{app.githubBranch || s.branch || 'main'}</dd><dt>Service type</dt><dd><Badge tone="info" dot={false}>{app.serviceType}</Badge></dd><dt>Live URL</dt><dd className="mono">{app.liveUrl || 'Pending'}</dd>{s.sourceRepository && <><dt>Source repository</dt><dd className="mono" style={{ wordBreak: 'break-all' }}>{s.sourceRepository}</dd></>}{root && <><dt>Render root</dt><dd className="mono" style={{ wordBreak: 'break-all' }}>{root}</dd></>}<dt>Build command</dt><dd className="mono">{s.buildCommand || g.buildCommand || 'Not set'}</dd><dt>Publish directory</dt><dd className="mono">{s.outputDirectory || g.publishDirectory || 'dist'}</dd></div></div>{(isZipUpload(app) || isRoxanneGenerated(app)) && <SourcePackageBlock app={app} />}</div><LiveLogsPanel deploymentId={deploymentId} compact /></div>; }
+// ── Deploy Presets ────────────────────────────────────────────────────────────
+
+const SETTINGS_PRESETS = [
+  { id: 'static-html', label: 'Static HTML', serviceType: 'static_site', buildCommand: 'bash glondia-render-build.sh', outputDirectory: '.' },
+  { id: 'vite-react', label: 'Vite React', serviceType: 'static_site', buildCommand: 'bash glondia-render-build.sh', outputDirectory: 'dist' },
+  { id: 'create-react-app', label: 'CRA', serviceType: 'static_site', buildCommand: 'bash glondia-render-build.sh', outputDirectory: 'build' },
+  { id: 'nextjs', label: 'Next.js', serviceType: 'web_service', runtime: 'node', buildCommand: 'npm install && npm run build', startCommand: 'npm start' },
+  { id: 'express-api', label: 'Express', serviceType: 'web_service', runtime: 'node', buildCommand: 'npm install', startCommand: 'npm start' },
+  { id: 'node-web-app', label: 'Node App', serviceType: 'web_service', runtime: 'node', buildCommand: 'npm install && npm run build', startCommand: 'npm start' },
+];
+
+// ── Deploy Doctor (post-deploy) ──────────────────────────────────────────────
+
+function getSettingsDoctorChecks(form = {}) {
+  const checks = [];
+  const serviceType = form.serviceType || 'static_site';
+  checks.push({ status: form.sourceRepository ? 'ok' : 'warn', label: form.sourceRepository ? 'Source repository set' : 'Source repository not configured', fix: null });
+  checks.push({ status: form.branch ? 'ok' : 'error', label: form.branch ? `Branch: ${form.branch}` : 'Branch is required', fix: null });
+  if ((form.rootDirectory || '').includes('/opt/render/project')) {
+    checks.push({ status: 'error', label: 'Root directory cannot be a local Render path', fix: { label: 'Clear root', patch: { rootDirectory: '' } } });
+  } else {
+    checks.push({ status: form.rootDirectory ? 'ok' : 'warn', label: form.rootDirectory ? `Root: ${form.rootDirectory}` : 'Root directory not set; repo root used', fix: null });
+  }
+  if (serviceType === 'static_site') {
+    checks.push({ status: form.buildCommand ? 'ok' : 'error', label: form.buildCommand ? 'Build command set' : 'Build command required', fix: !form.buildCommand ? { label: 'Use npm run build', patch: { buildCommand: 'npm run build' } } : null });
+    checks.push({ status: form.outputDirectory ? 'ok' : 'error', label: form.outputDirectory ? `Publish: ${form.outputDirectory}` : 'Publish directory required', fix: !form.outputDirectory ? { label: 'Use dist', patch: { outputDirectory: 'dist' } } : null });
+  }
+  if (serviceType === 'web_service') {
+    checks.push({ status: form.buildCommand ? 'ok' : 'error', label: form.buildCommand ? 'Build command set' : 'Build command required', fix: !form.buildCommand ? { label: 'Use npm install', patch: { buildCommand: 'npm install' } } : null });
+    checks.push({ status: form.startCommand ? 'ok' : 'error', label: form.startCommand ? 'Start command set' : 'Start command required', fix: !form.startCommand ? { label: 'Use npm start', patch: { startCommand: 'npm start' } } : null });
+    checks.push({ status: 'info', label: 'Must listen on process.env.PORT / 0.0.0.0', fix: null });
+  }
+  return checks;
+}
+
+function getReadinessScore(checks = []) {
+  if (!checks.length) return 0;
+  const max = checks.length * 2;
+  const score = checks.reduce((t, c) => t + (c.status === 'ok' ? 2 : c.status === 'warn' || c.status === 'info' ? 1 : 0), 0);
+  return Math.round((score / max) * 100);
+}
+
 function RenderSettingsTab({ app, deploymentId, onReload }) {
   const s = app.environmentConfiguration || {};
   const [form, setForm] = useState({
@@ -99,13 +141,35 @@ function RenderSettingsTab({ app, deploymentId, onReload }) {
   });
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState('');
+  const [presetNotice, setPresetNotice] = useState('');
+  const [showDoctor, setShowDoctor] = useState(true);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const isStatic = form.serviceType === 'static_site';
   const realService = hasRealRenderId(app.renderServiceId);
 
+  const doctorChecks = useMemo(() => getSettingsDoctorChecks(form), [form]);
+  const score = useMemo(() => getReadinessScore(doctorChecks), [doctorChecks]);
+  const errors = doctorChecks.filter((c) => c.status === 'error').length;
+  const warnings = doctorChecks.filter((c) => c.status === 'warn').length;
+
+  const applyPreset = (p) => {
+    setForm((f) => ({
+      ...f,
+      serviceType: p.serviceType || f.serviceType,
+      buildCommand: p.buildCommand || f.buildCommand,
+      ...(p.outputDirectory !== undefined ? { outputDirectory: p.outputDirectory } : {}),
+      ...(p.startCommand !== undefined ? { startCommand: p.startCommand } : {}),
+      ...(p.runtime !== undefined ? { runtime: p.runtime } : {}),
+    }));
+    setPresetNotice(`${p.label} preset applied`);
+    setTimeout(() => setPresetNotice(''), 3000);
+  };
+
+  const applyFix = (patch = {}) => setForm((f) => ({ ...f, ...patch }));
+
   const runAction = async (name, fn) => {
     setBusy(name); setMsg('');
-    try { await fn(); setMsg(name === 'sync' ? 'Synced with Render.' : name === 'save' ? 'Settings saved to Render.' : name === 'redeploy' ? 'Settings saved & redeploy triggered.' : name === 'clearRedeploy' ? 'Cache cleared & redeploy triggered.' : 'Done.'); onReload?.(); }
+    try { await fn(); setMsg(name === 'sync' ? 'Synced with Render.' : name === 'save' ? 'Settings saved to Render.' : name === 'redeploy' ? 'Settings saved & redeploy triggered.' : name === 'clearRedeploy' ? 'Cache cleared & redeploy triggered.' : name === 'retry' ? 'Redeploy triggered.' : name === 'validate' ? 'Validation complete — see Deploy Doctor above.' : 'Done.'); onReload?.(); }
     catch (e) { setMsg(e.message || 'Action failed.'); }
     finally { setBusy(''); }
   };
@@ -114,49 +178,120 @@ function RenderSettingsTab({ app, deploymentId, onReload }) {
   const handleSaveRedeploy = () => runAction('redeploy', () => redeployHostingWithSettings(deploymentId, { ...form, clearCache: false }));
   const handleClearRedeploy = () => runAction('clearRedeploy', () => redeployHostingWithSettings(deploymentId, { ...form, clearCache: true }));
   const handleSync = () => runAction('sync', () => syncHostingDeployment(deploymentId));
+  const handleRetry = () => runAction('retry', () => redeployRenderDeployment(deploymentId));
 
-  return <div className="grid-side"><div className="card">
-    <h2 style={{ marginTop: 0 }}>Render service settings</h2>
-    <div className="render-config-grid">
-      <label><span>Service name</span><input className="input mono" value={form.serviceName} onChange={(e) => set('serviceName', e.target.value)} /></label>
-      <label><span>Service type</span><select className="input" value={form.serviceType} onChange={(e) => set('serviceType', e.target.value)}><option value="static_site">Static Site</option><option value="web_service">Web Service</option></select></label>
-      <label><span>Branch</span><input className="input mono" value={form.branch} onChange={(e) => set('branch', e.target.value)} /></label>
-      <label><span>Root directory</span><input className="input mono" value={form.rootDirectory} onChange={(e) => set('rootDirectory', e.target.value)} placeholder="./" />{form.rootDirectory.includes('/opt/render/project') && <span style={{ color: 'var(--danger)', fontSize: 11 }}>Must be a repo path, not a local Render path.</span>}</label>
-      <label><span>Source repository</span><input className="input mono" value={form.sourceRepository} onChange={(e) => set('sourceRepository', e.target.value)} /></label>
+  return <div className="grid-side"><div style={{ display: 'grid', gap: 16 }}>
+    {/* Settings form */}
+    <div className="card">
+      <h2 style={{ marginTop: 0 }}>Render service settings</h2>
+
+      {/* Preset chips */}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+        {SETTINGS_PRESETS.map((p) => (
+          <button key={p.id} className="btn btn-sm btn-outline" onClick={() => applyPreset(p)} style={{ fontSize: 11, padding: '3px 8px' }}>{p.label}</button>
+        ))}
+      </div>
+      {presetNotice && <div style={{ color: 'var(--accent)', fontSize: 12, marginBottom: 8 }}>{presetNotice}</div>}
+
+      <div className="render-config-grid">
+        <label><span>Service name</span><input className="input mono" value={form.serviceName} onChange={(e) => set('serviceName', e.target.value)} /></label>
+        <label><span>Service type</span><select className="input" value={form.serviceType} onChange={(e) => set('serviceType', e.target.value)}><option value="static_site">Static Site</option><option value="web_service">Web Service</option></select></label>
+        <label><span>Branch</span><input className="input mono" value={form.branch} onChange={(e) => set('branch', e.target.value)} /></label>
+        <label><span>Root directory</span><input className="input mono" value={form.rootDirectory} onChange={(e) => set('rootDirectory', e.target.value)} placeholder="./" />{form.rootDirectory.includes('/opt/render/project') && <span style={{ color: 'var(--danger)', fontSize: 11 }}>Must be a repo path, not a local Render path.</span>}</label>
+        <label><span>Source repository</span><input className="input mono" value={form.sourceRepository} onChange={(e) => set('sourceRepository', e.target.value)} /></label>
+      </div>
+
+      <h3 style={{ marginTop: 16 }}>{isStatic ? 'Static Site Build Settings' : 'Web Service Build & Runtime'}</h3>
+      <div className="render-config-grid">
+        {!isStatic && <label><span>Runtime</span><select className="input" value={form.runtime} onChange={(e) => set('runtime', e.target.value)}><option value="node">Node</option><option value="python">Python</option><option value="go">Go</option><option value="rust">Rust</option><option value="ruby">Ruby</option><option value="elixir">Elixir</option></select></label>}
+        <label><span>Build command</span><input className="input mono" value={form.buildCommand} onChange={(e) => set('buildCommand', e.target.value)} placeholder={isStatic ? 'npm run build' : 'npm install && npm run build'} /></label>
+        {isStatic
+          ? <label><span>Publish directory</span><input className="input mono" value={form.outputDirectory} onChange={(e) => set('outputDirectory', e.target.value)} placeholder="dist" /></label>
+          : <>
+              <label><span>Start command</span><input className="input mono" value={form.startCommand} onChange={(e) => set('startCommand', e.target.value)} placeholder="npm start" /></label>
+              <label><span>Health check path</span><input className="input mono" value={form.healthCheckPath} onChange={(e) => set('healthCheckPath', e.target.value)} placeholder="/" /></label>
+            </>
+        }
+        <label><span>Plan</span><input className="input mono" value={form.plan} onChange={(e) => set('plan', e.target.value)} /></label>
+        <label><span>Region</span><select className="input" value={form.region} onChange={(e) => set('region', e.target.value)}><option value="oregon">Oregon (US West)</option><option value="ohio">Ohio (US East)</option><option value="frankfurt">Frankfurt (EU)</option><option value="singapore">Singapore (Asia)</option></select></label>
+      </div>
+
+      {/* Action buttons */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 16 }}>
+        <button className="btn btn-primary" disabled={!!busy || !realService} onClick={handleSave}><ICN.CheckCircle size={14} /> {busy === 'save' ? 'Saving...' : 'Save Settings'}</button>
+        <button className="btn btn-primary" disabled={!!busy || !realService} onClick={handleSaveRedeploy}><ICN.Rocket size={14} /> {busy === 'redeploy' ? 'Deploying...' : 'Save & Redeploy'}</button>
+        <button className="btn btn-outline" disabled={!!busy || !realService} onClick={handleClearRedeploy}><ICN.Trash size={14} /> {busy === 'clearRedeploy' ? 'Deploying...' : 'Clear Cache & Redeploy'}</button>
+        <button className="btn btn-outline" disabled={!!busy || !realService} onClick={handleSync}><ICN.Refresh size={14} /> {busy === 'sync' ? 'Syncing...' : 'Sync with Render'}</button>
+      </div>
+      {msg && <p className="muted" style={{ marginTop: 10 }}>{msg}</p>}
     </div>
 
-    <h3 style={{ marginTop: 16 }}>{isStatic ? 'Static Site Build Settings' : 'Web Service Build & Runtime'}</h3>
-    <div className="render-config-grid">
-      {!isStatic && <label><span>Runtime</span><select className="input" value={form.runtime} onChange={(e) => set('runtime', e.target.value)}><option value="node">Node</option><option value="python">Python</option><option value="go">Go</option><option value="rust">Rust</option><option value="ruby">Ruby</option><option value="elixir">Elixir</option></select></label>}
-      <label><span>Build command</span><input className="input mono" value={form.buildCommand} onChange={(e) => set('buildCommand', e.target.value)} placeholder={isStatic ? 'npm run build' : 'npm install && npm run build'} /></label>
-      {isStatic
-        ? <label><span>Publish directory</span><input className="input mono" value={form.outputDirectory} onChange={(e) => set('outputDirectory', e.target.value)} placeholder="dist" /></label>
-        : <>
-            <label><span>Start command</span><input className="input mono" value={form.startCommand} onChange={(e) => set('startCommand', e.target.value)} placeholder="npm start" /></label>
-            <label><span>Health check path</span><input className="input mono" value={form.healthCheckPath} onChange={(e) => set('healthCheckPath', e.target.value)} placeholder="/" /></label>
-            <div className="muted" style={{ fontSize: 11, padding: '4px 0' }}>Your app must listen on process.env.PORT and bind to 0.0.0.0.</div>
-          </>
-      }
-      <label><span>Plan</span><input className="input mono" value={form.plan} onChange={(e) => set('plan', e.target.value)} /></label>
-      <label><span>Region</span><select className="input" value={form.region} onChange={(e) => set('region', e.target.value)}><option value="oregon">Oregon (US West)</option><option value="ohio">Ohio (US East)</option><option value="frankfurt">Frankfurt (EU)</option><option value="singapore">Singapore (Asia)</option></select></label>
+    {/* Deployment Preview */}
+    <div className="card" style={{ padding: 14, background: 'var(--bg-deep)' }}>
+      <div className="eyebrow">Deployment preview</div>
+      <h3 style={{ margin: '4px 0 10px' }}>Render will use these settings</h3>
+      <div className="kv" style={{ gridTemplateColumns: '120px 1fr' }}>
+        <dt>Service name</dt><dd className="mono">{form.serviceName || app.serviceName || 'auto'}</dd>
+        <dt>Type</dt><dd>{form.serviceType}</dd>
+        <dt>Repo</dt><dd className="mono" style={{ wordBreak: 'break-all' }}>{form.sourceRepository || '(not set)'}</dd>
+        <dt>Branch</dt><dd className="mono">{form.branch || 'main'}</dd>
+        <dt>Root</dt><dd className="mono">{form.rootDirectory || 'repo root'}</dd>
+        <dt>Build</dt><dd className="mono">{form.buildCommand || 'Not set'}</dd>
+        {isStatic
+          ? <><dt>Publish</dt><dd className="mono">{form.outputDirectory || 'Not set'}</dd></>
+          : <><dt>Start</dt><dd className="mono">{form.startCommand || 'Not set'}</dd></>}
+        <dt>Plan</dt><dd className="mono">{form.plan || 'starter'}</dd>
+        <dt>Region</dt><dd className="mono">{form.region || 'oregon'}</dd>
+      </div>
+    </div>
+  </div><div style={{ display: 'grid', gap: 16 }}>
+
+    {/* Current Render record */}
+    <div className="card">
+      <h2 style={{ marginTop: 0 }}>Current Render record</h2>
+      <div className="kv">
+        <dt>Service ID</dt><dd className="mono">{realService ? app.renderServiceId : 'Pending'}</dd>
+        <dt>Deploy ID</dt><dd className="mono">{hasRealRenderId(app.renderDeployId) ? app.renderDeployId : 'Pending'}</dd>
+        <dt>Source repository</dt><dd className="mono" style={{ wordBreak: 'break-all' }}>{s.sourceRepository || app.repoUrl || 'Not configured'}</dd>
+        <dt>Render root</dt><dd className="mono" style={{ wordBreak: 'break-all' }}>{getRenderSourceRoot(app) || 'Not set'}</dd>
+        <dt>Last synced</dt><dd>{formatDate(app.lastRenderSyncedAt)}</dd>
+        <dt>Provider status</dt><dd className="mono">{app.providerStatus || app.renderDeployStatus || '—'}</dd>
+      </div>
     </div>
 
-    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 16 }}>
-      <button className="btn btn-primary" disabled={!!busy || !realService} onClick={handleSave}><ICN.CheckCircle size={14} /> {busy === 'save' ? 'Saving...' : 'Save Settings'}</button>
-      <button className="btn btn-primary" disabled={!!busy || !realService} onClick={handleSaveRedeploy}><ICN.Rocket size={14} /> {busy === 'redeploy' ? 'Deploying...' : 'Save & Redeploy'}</button>
-      <button className="btn btn-outline" disabled={!!busy || !realService} onClick={handleClearRedeploy}><ICN.Trash size={14} /> {busy === 'clearRedeploy' ? 'Deploying...' : 'Clear Cache & Redeploy'}</button>
-      <button className="btn btn-outline" disabled={!!busy || !realService} onClick={handleSync}><ICN.Refresh size={14} /> {busy === 'sync' ? 'Syncing...' : 'Sync with Render'}</button>
+    {/* Deploy Doctor */}
+    <div className="card" style={{ padding: 14, background: 'var(--bg-deep)' }}>
+      <div className="row between">
+        <div><div className="eyebrow">Deploy Doctor</div><h3 style={{ margin: '4px 0 0' }}>Settings validation</h3></div>
+        <div className="row" style={{ gap: 8 }}>
+          <Badge tone={errors ? 'danger' : warnings ? 'warn' : 'success'} dot={false}>{errors ? `${errors} issue${errors > 1 ? 's' : ''}` : warnings ? `${warnings} warning${warnings > 1 ? 's' : ''}` : 'Ready'}</Badge>
+          <Badge tone={score >= 100 ? 'success' : score >= 70 ? 'warn' : 'danger'} dot={false}>{score}%</Badge>
+        </div>
+      </div>
+      {showDoctor && <div style={{ display: 'grid', gap: 6, marginTop: 12 }}>
+        {doctorChecks.map((check, i) => (
+          <div key={i} className="row between" style={{ gap: 8 }}>
+            <div className="row" style={{ gap: 8 }}>
+              <span style={{ color: check.status === 'ok' ? 'var(--accent)' : check.status === 'error' ? 'var(--danger)' : check.status === 'warn' ? 'var(--warning)' : 'var(--text-muted)' }}>
+                {check.status === 'ok' ? '✓' : check.status === 'error' ? '✗' : check.status === 'warn' ? '⚠' : '•'}
+              </span>
+              <span className="muted" style={{ fontSize: 13 }}>{check.label}</span>
+            </div>
+            {check.fix && <button className="btn btn-sm btn-outline" onClick={() => applyFix(check.fix.patch)}>{check.fix.label}</button>}
+          </div>
+        ))}
+      </div>}
     </div>
-    {msg && <p className="muted" style={{ marginTop: 10 }}>{msg}</p>}
-  </div><div className="card">
-    <h2 style={{ marginTop: 0 }}>Current Render record</h2>
-    <div className="kv">
-      <dt>Service ID</dt><dd className="mono">{realService ? app.renderServiceId : 'Pending'}</dd>
-      <dt>Deploy ID</dt><dd className="mono">{hasRealRenderId(app.renderDeployId) ? app.renderDeployId : 'Pending'}</dd>
-      <dt>Source repository</dt><dd className="mono" style={{ wordBreak: 'break-all' }}>{s.sourceRepository || app.repoUrl || 'Not configured'}</dd>
-      <dt>Render root</dt><dd className="mono" style={{ wordBreak: 'break-all' }}>{getRenderSourceRoot(app) || 'Not set'}</dd>
-      <dt>Last synced</dt><dd>{formatDate(app.lastRenderSyncedAt)}</dd>
-      <dt>Provider status</dt><dd className="mono">{app.providerStatus || app.renderDeployStatus || '—'}</dd>
+
+    {/* Repair Tools */}
+    <div className="card">
+      <h2 style={{ marginTop: 0 }}>Repair tools</h2>
+      <div style={{ display: 'grid', gap: 8 }}>
+        <button className="btn btn-outline" disabled={!!busy || !realService} onClick={handleSync}><ICN.Refresh size={14} /> Sync with Render</button>
+        <button className="btn btn-outline" disabled={!!busy || !realService} onClick={handleRetry}><ICN.Refresh size={14} /> {busy === 'retry' ? 'Deploying...' : 'Retry deploy'}</button>
+        <button className="btn btn-outline" disabled={!!busy || !realService} onClick={handleClearRedeploy}><ICN.Trash size={14} /> Clear cache & redeploy</button>
+        <button className="btn btn-outline" onClick={() => { setShowDoctor(true); setMsg('Validation refreshed — see Deploy Doctor.'); }}><ICN.AlertCircle size={14} /> Validate settings</button>
+      </div>
     </div>
   </div></div>;
 }
