@@ -19,6 +19,22 @@ const hostingController = {
   ['de' + 'leteHostingService']: async (req, res, next) => {
     try { res.ok(await hostingService['de' + 'lete'](req.params.deploymentId)); } catch (error) { next(error); }
   },
+
+  updateDeploySettings: async (req, res, next) => {
+    try { res.ok(await hostingService.updateDeploySettings(req.params.deploymentId, req.body || {})); } catch (error) { next(error); }
+  },
+
+  updateBuildSettings: async (req, res, next) => {
+    try { res.ok(await hostingService.updateBuildSettings(req.params.deploymentId, req.body || {})); } catch (error) { next(error); }
+  },
+
+  updateSourceSettings: async (req, res, next) => {
+    try { res.ok(await hostingService.updateSourceSettings(req.params.deploymentId, req.body || {})); } catch (error) { next(error); }
+  },
+
+  redeployWithSettings: async (req, res, next) => {
+    try { res.ok(await hostingService.redeployWithSettings(req.params.deploymentId, req.body || {})); } catch (error) { next(error); }
+  },
 };
 
 export default hostingController;

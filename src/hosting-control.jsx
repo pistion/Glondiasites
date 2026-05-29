@@ -22,6 +22,10 @@ import {
   addHostingDomain,
   verifyHostingDomain,
   updateHostingSettings,
+  updateHostingDeploySettings,
+  updateHostingBuildSettings,
+  updateHostingSourceSettings,
+  redeployHostingWithSettings,
 } from './api';
 
 function getHostingSourceType(app) {
@@ -77,7 +81,85 @@ function WarmingBlock({ app }) { return <div style={{ marginTop: 18, padding: 14
 function FailureBlock({ app }) { return <div style={{ marginTop: 18, padding: 14, border: '1px solid var(--danger)', borderRadius: 'var(--r-sm)', background: 'var(--bg-deep)' }}><div className="row" style={{ gap: 8, color: 'var(--danger)', fontWeight: 700 }}><ICN.AlertCircle size={16} /> Deployment failed</div><div className="muted" style={{ marginTop: 8 }}>{app.errorMessage || 'Review logs and settings, then redeploy.'}</div></div>; }
 function AdminPanel({ app, busy, onSuspend }) { const real = hasRealRenderId(app.renderServiceId); return <div className="card"><h2 style={{ marginTop: 0 }}>Admin controls</h2><div className="kv" style={{ gridTemplateColumns: '140px 1fr', marginBottom: 16 }}><dt>Deployment ID</dt><dd className="mono">{app.deploymentId}</dd><dt>Render service</dt><dd className="mono">{real ? app.renderServiceId : 'Pending configuration'}</dd><dt>Render deploy</dt><dd className="mono">{hasRealRenderId(app.renderDeployId) ? app.renderDeployId : 'Pending'}</dd><dt>Last synced</dt><dd>{formatDate(app.lastRenderSyncedAt)}</dd><dt>Created</dt><dd>{formatDate(app.createdAt)}</dd></div><div style={{ display: 'grid', gap: 10 }}><button className="btn btn-outline" disabled={!real || busy === 'suspend' || app.status === 'suspended'} onClick={onSuspend}><ICN.Power size={14} /> Suspend Site</button></div></div>; }
 function OverviewTab({ app, deploymentId }) { const g = app.generatedSite || {}; const s = app.environmentConfiguration || {}; const root = getRenderSourceRoot(app); return <div className="grid-side"><div style={{ display: 'grid', gap: 16 }}><div className="card"><h2 style={{ marginTop: 0 }}>Hosting app</h2><div className="kv"><dt>Source</dt><dd className="mono">{sourceLabel(app)}</dd><dt>Branch</dt><dd className="mono">{app.githubBranch || s.branch || 'main'}</dd><dt>Service type</dt><dd><Badge tone="info" dot={false}>{app.serviceType}</Badge></dd><dt>Live URL</dt><dd className="mono">{app.liveUrl || 'Pending'}</dd>{s.sourceRepository && <><dt>Source repository</dt><dd className="mono" style={{ wordBreak: 'break-all' }}>{s.sourceRepository}</dd></>}{root && <><dt>Render root</dt><dd className="mono" style={{ wordBreak: 'break-all' }}>{root}</dd></>}<dt>Build command</dt><dd className="mono">{s.buildCommand || g.buildCommand || 'Not set'}</dd><dt>Publish directory</dt><dd className="mono">{s.outputDirectory || g.publishDirectory || 'dist'}</dd></div></div>{(isZipUpload(app) || isRoxanneGenerated(app)) && <SourcePackageBlock app={app} />}</div><LiveLogsPanel deploymentId={deploymentId} compact /></div>; }
-function RenderSettingsTab({ app, deploymentId, onReload }) { const s = app.environmentConfiguration || {}; const [form, setForm] = useState({ serviceName: app.serviceName || '', serviceType: app.serviceType || 'static_site', branch: app.githubBranch || s.branch || 'main', rootDirectory: s.rootDirectory || '', buildCommand: s.buildCommand || '', startCommand: s.startCommand || '', outputDirectory: s.outputDirectory || 'dist', plan: app.plan || s.plan || 'starter', region: s.region || 'oregon', sourceRepository: s.sourceRepository || app.repoUrl || '' }); const [saving, setSaving] = useState(false); const [msg, setMsg] = useState(''); const set = (k, v) => setForm((f) => ({ ...f, [k]: v })); const save = async () => { setSaving(true); setMsg(''); try { await updateHostingSettings(deploymentId, form); setMsg('Saved and synced to Render/local record.'); onReload?.(); } catch (e) { setMsg(e.message || 'Save failed.'); } finally { setSaving(false); } }; return <div className="grid-side"><div className="card"><h2 style={{ marginTop: 0 }}>Render service settings</h2><div className="render-config-grid"><label><span>Service name</span><input className="input mono" value={form.serviceName} onChange={(e) => set('serviceName', e.target.value)} /></label><label><span>Service type</span><select className="input" value={form.serviceType} onChange={(e) => set('serviceType', e.target.value)}><option value="static_site">Static Site</option><option value="web_service">Web Service</option><option value="private_service">Private Service</option><option value="docker">Docker</option><option value="postgres">Postgres Database</option></select></label><label><span>Branch</span><input className="input mono" value={form.branch} onChange={(e) => set('branch', e.target.value)} /></label><label><span>Root directory</span><input className="input mono" value={form.rootDirectory} onChange={(e) => set('rootDirectory', e.target.value)} /></label><label><span>Build command</span><input className="input mono" value={form.buildCommand} onChange={(e) => set('buildCommand', e.target.value)} /></label><label><span>Publish directory</span><input className="input mono" value={form.outputDirectory} onChange={(e) => set('outputDirectory', e.target.value)} /></label><label><span>Start command</span><input className="input mono" value={form.startCommand} onChange={(e) => set('startCommand', e.target.value)} /></label><label><span>Plan</span><input className="input mono" value={form.plan} onChange={(e) => set('plan', e.target.value)} /></label><label><span>Region</span><input className="input mono" value={form.region} onChange={(e) => set('region', e.target.value)} /></label><label><span>Source repository</span><input className="input mono" value={form.sourceRepository} onChange={(e) => set('sourceRepository', e.target.value)} /></label></div><button className="btn btn-primary" style={{ marginTop: 12 }} disabled={saving || !hasRealRenderId(app.renderServiceId)} onClick={save}><ICN.Save size={14} /> {saving ? 'Saving...' : 'Save settings'}</button>{msg && <p className="muted" style={{ marginTop: 10 }}>{msg}</p>}</div><div className="card"><h2 style={{ marginTop: 0 }}>Current Render record</h2><div className="kv"><dt>Service ID</dt><dd className="mono">{hasRealRenderId(app.renderServiceId) ? app.renderServiceId : 'Pending'}</dd><dt>Deploy ID</dt><dd className="mono">{hasRealRenderId(app.renderDeployId) ? app.renderDeployId : 'Pending'}</dd><dt>Source repository</dt><dd className="mono" style={{ wordBreak: 'break-all' }}>{s.sourceRepository || app.repoUrl || 'Not configured'}</dd><dt>Render root</dt><dd className="mono" style={{ wordBreak: 'break-all' }}>{getRenderSourceRoot(app) || 'Not set'}</dd></div></div></div>; }
+function RenderSettingsTab({ app, deploymentId, onReload }) {
+  const s = app.environmentConfiguration || {};
+  const [form, setForm] = useState({
+    serviceName: app.serviceName || '',
+    serviceType: app.serviceType || 'static_site',
+    branch: app.githubBranch || s.branch || 'main',
+    rootDirectory: s.rootDirectory || '',
+    buildCommand: s.buildCommand || '',
+    startCommand: s.startCommand || '',
+    outputDirectory: s.outputDirectory || 'dist',
+    runtime: s.runtime || 'node',
+    healthCheckPath: s.healthCheckPath || '/',
+    plan: app.plan || s.plan || 'starter',
+    region: s.region || 'oregon',
+    sourceRepository: s.sourceRepository || app.repoUrl || '',
+  });
+  const [busy, setBusy] = useState('');
+  const [msg, setMsg] = useState('');
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const isStatic = form.serviceType === 'static_site';
+  const realService = hasRealRenderId(app.renderServiceId);
+
+  const runAction = async (name, fn) => {
+    setBusy(name); setMsg('');
+    try { await fn(); setMsg(name === 'sync' ? 'Synced with Render.' : name === 'save' ? 'Settings saved to Render.' : name === 'redeploy' ? 'Settings saved & redeploy triggered.' : name === 'clearRedeploy' ? 'Cache cleared & redeploy triggered.' : 'Done.'); onReload?.(); }
+    catch (e) { setMsg(e.message || 'Action failed.'); }
+    finally { setBusy(''); }
+  };
+
+  const handleSave = () => runAction('save', () => updateHostingSettings(deploymentId, form));
+  const handleSaveRedeploy = () => runAction('redeploy', () => redeployHostingWithSettings(deploymentId, { ...form, clearCache: false }));
+  const handleClearRedeploy = () => runAction('clearRedeploy', () => redeployHostingWithSettings(deploymentId, { ...form, clearCache: true }));
+  const handleSync = () => runAction('sync', () => syncHostingDeployment(deploymentId));
+
+  return <div className="grid-side"><div className="card">
+    <h2 style={{ marginTop: 0 }}>Render service settings</h2>
+    <div className="render-config-grid">
+      <label><span>Service name</span><input className="input mono" value={form.serviceName} onChange={(e) => set('serviceName', e.target.value)} /></label>
+      <label><span>Service type</span><select className="input" value={form.serviceType} onChange={(e) => set('serviceType', e.target.value)}><option value="static_site">Static Site</option><option value="web_service">Web Service</option></select></label>
+      <label><span>Branch</span><input className="input mono" value={form.branch} onChange={(e) => set('branch', e.target.value)} /></label>
+      <label><span>Root directory</span><input className="input mono" value={form.rootDirectory} onChange={(e) => set('rootDirectory', e.target.value)} placeholder="./" />{form.rootDirectory.includes('/opt/render/project') && <span style={{ color: 'var(--danger)', fontSize: 11 }}>Must be a repo path, not a local Render path.</span>}</label>
+      <label><span>Source repository</span><input className="input mono" value={form.sourceRepository} onChange={(e) => set('sourceRepository', e.target.value)} /></label>
+    </div>
+
+    <h3 style={{ marginTop: 16 }}>{isStatic ? 'Static Site Build Settings' : 'Web Service Build & Runtime'}</h3>
+    <div className="render-config-grid">
+      {!isStatic && <label><span>Runtime</span><select className="input" value={form.runtime} onChange={(e) => set('runtime', e.target.value)}><option value="node">Node</option><option value="python">Python</option><option value="go">Go</option><option value="rust">Rust</option><option value="ruby">Ruby</option><option value="elixir">Elixir</option></select></label>}
+      <label><span>Build command</span><input className="input mono" value={form.buildCommand} onChange={(e) => set('buildCommand', e.target.value)} placeholder={isStatic ? 'npm run build' : 'npm install && npm run build'} /></label>
+      {isStatic
+        ? <label><span>Publish directory</span><input className="input mono" value={form.outputDirectory} onChange={(e) => set('outputDirectory', e.target.value)} placeholder="dist" /></label>
+        : <>
+            <label><span>Start command</span><input className="input mono" value={form.startCommand} onChange={(e) => set('startCommand', e.target.value)} placeholder="npm start" /></label>
+            <label><span>Health check path</span><input className="input mono" value={form.healthCheckPath} onChange={(e) => set('healthCheckPath', e.target.value)} placeholder="/" /></label>
+            <div className="muted" style={{ fontSize: 11, padding: '4px 0' }}>Your app must listen on process.env.PORT and bind to 0.0.0.0.</div>
+          </>
+      }
+      <label><span>Plan</span><input className="input mono" value={form.plan} onChange={(e) => set('plan', e.target.value)} /></label>
+      <label><span>Region</span><select className="input" value={form.region} onChange={(e) => set('region', e.target.value)}><option value="oregon">Oregon (US West)</option><option value="ohio">Ohio (US East)</option><option value="frankfurt">Frankfurt (EU)</option><option value="singapore">Singapore (Asia)</option></select></label>
+    </div>
+
+    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 16 }}>
+      <button className="btn btn-primary" disabled={!!busy || !realService} onClick={handleSave}><ICN.CheckCircle size={14} /> {busy === 'save' ? 'Saving...' : 'Save Settings'}</button>
+      <button className="btn btn-primary" disabled={!!busy || !realService} onClick={handleSaveRedeploy}><ICN.Rocket size={14} /> {busy === 'redeploy' ? 'Deploying...' : 'Save & Redeploy'}</button>
+      <button className="btn btn-outline" disabled={!!busy || !realService} onClick={handleClearRedeploy}><ICN.Trash size={14} /> {busy === 'clearRedeploy' ? 'Deploying...' : 'Clear Cache & Redeploy'}</button>
+      <button className="btn btn-outline" disabled={!!busy || !realService} onClick={handleSync}><ICN.Refresh size={14} /> {busy === 'sync' ? 'Syncing...' : 'Sync with Render'}</button>
+    </div>
+    {msg && <p className="muted" style={{ marginTop: 10 }}>{msg}</p>}
+  </div><div className="card">
+    <h2 style={{ marginTop: 0 }}>Current Render record</h2>
+    <div className="kv">
+      <dt>Service ID</dt><dd className="mono">{realService ? app.renderServiceId : 'Pending'}</dd>
+      <dt>Deploy ID</dt><dd className="mono">{hasRealRenderId(app.renderDeployId) ? app.renderDeployId : 'Pending'}</dd>
+      <dt>Source repository</dt><dd className="mono" style={{ wordBreak: 'break-all' }}>{s.sourceRepository || app.repoUrl || 'Not configured'}</dd>
+      <dt>Render root</dt><dd className="mono" style={{ wordBreak: 'break-all' }}>{getRenderSourceRoot(app) || 'Not set'}</dd>
+      <dt>Last synced</dt><dd>{formatDate(app.lastRenderSyncedAt)}</dd>
+      <dt>Provider status</dt><dd className="mono">{app.providerStatus || app.renderDeployStatus || '—'}</dd>
+    </div>
+  </div></div>;
+}
 function EnvVarsTab({ deploymentId }) { const [items, setItems] = useState([]); const [form, setForm] = useState({ key: '', value: '' }); const [msg, setMsg] = useState(''); const load = () => listHostingEnvVars(deploymentId).then(setItems).catch((e) => setMsg(e.message)); useEffect(load, [deploymentId]); const add = async () => { await upsertHostingEnvVar(deploymentId, form); setForm({ key: '', value: '' }); load(); }; return <div className="card"><h2 style={{ marginTop: 0 }}>Environment variables</h2><div className="input-group"><input className="input mono" placeholder="KEY" value={form.key} onChange={(e) => setForm((f) => ({ ...f, key: e.target.value }))} /><input className="input mono" placeholder="value" value={form.value} onChange={(e) => setForm((f) => ({ ...f, value: e.target.value }))} /><button className="btn btn-primary" onClick={add}>Add</button><button className="btn btn-outline" onClick={() => syncHostingEnvVars(deploymentId).then(load)}>Sync to Render</button></div>{msg && <p className="muted">{msg}</p>}<div className="kv" style={{ marginTop: 14 }}>{items.map((v) => <React.Fragment key={v.key}><dt className="mono">{v.key}</dt><dd><span className="mono">{v.valuePreview || 'hidden'}</span></dd></React.Fragment>)}</div></div>; }
 function DisksTab({ app, deploymentId }) { const [items, setItems] = useState([]); const [form, setForm] = useState({ name: '', mountPath: '/data', sizeGB: 1 }); const load = () => listHostingDisks(deploymentId).then(setItems).catch(() => setItems([])); useEffect(load, [deploymentId]); const add = async () => { await attachHostingDisk(deploymentId, form); load(); }; return <div className="card"><h2 style={{ marginTop: 0 }}>Persistent disks</h2>{app.serviceType !== 'web_service' && <p className="muted">Disks are only available for Render web services.</p>}<div className="input-group"><input className="input" placeholder="disk name" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} /><input className="input mono" placeholder="/data" value={form.mountPath} onChange={(e) => setForm((f) => ({ ...f, mountPath: e.target.value }))} /><input className="input mono" type="number" value={form.sizeGB} onChange={(e) => setForm((f) => ({ ...f, sizeGB: e.target.value }))} /><button className="btn btn-primary" disabled={app.serviceType !== 'web_service'} onClick={add}>Attach</button></div><div className="kv" style={{ marginTop: 14 }}>{items.map((d) => <React.Fragment key={d.diskId}><dt>{d.name}</dt><dd className="mono">{d.mountPath} · {d.sizeGB}GB <button className="btn btn-sm btn-outline" onClick={() => updateHostingDisk(deploymentId, d.diskId, d).then(load)}>Sync</button></dd></React.Fragment>)}</div></div>; }
 function DomainsTab({ deploymentId }) { const [items, setItems] = useState([]); const [domain, setDomain] = useState(''); const load = () => listHostingDomains(deploymentId).then(setItems).catch(() => setItems([])); useEffect(load, [deploymentId]); const add = async () => { await addHostingDomain(deploymentId, { domain }); setDomain(''); load(); }; return <div className="card"><h2 style={{ marginTop: 0 }}>Custom domains</h2><div className="input-group"><input className="input mono" placeholder="example.com" value={domain} onChange={(e) => setDomain(e.target.value)} /><button className="btn btn-primary" onClick={add}>Add domain</button></div><div className="kv" style={{ marginTop: 14 }}>{items.map((d) => <React.Fragment key={d.domainId}><dt className="mono">{d.name}</dt><dd>{d.status || d.verificationStatus || 'pending'} <button className="btn btn-sm btn-outline" onClick={() => verifyHostingDomain(deploymentId, d.domainId).then(load)}>Verify</button></dd></React.Fragment>)}</div></div>; }

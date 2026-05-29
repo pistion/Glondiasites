@@ -197,14 +197,35 @@ class HostingService {
       // Refresh build/deploy status first
       await deploymentStatusService.refreshDeployment(deployment);
 
-      // Fetch full Render snapshot
-      const snapshot = await renderApiService.getServiceSnapshot(deployment.renderServiceId);
+      // Fetch full Render snapshot, fall back to basic service fetch
+      let snapshot;
+      try {
+        snapshot = await renderApiService.getServiceSnapshot(deployment.renderServiceId);
+      } catch (snapshotError) {
+        if (isRenderGone(snapshotError)) throw snapshotError;
+        snapshot = await this.getFallbackRenderSnapshot(deployment.renderServiceId);
+      }
       return this.applyRenderSnapshot(deployment.deploymentId, snapshot);
     } catch (error) {
       if (isRenderGone(error)) return this.markDeletedOnRender(deployment, error);
       if (options.quiet) return deployment;
       throw error;
     }
+  }
+
+  /**
+   * Fallback snapshot using just getService when getServiceSnapshot fails.
+   * Returns a minimal snapshot shape so applyRenderSnapshot can handle it.
+   */
+  async getFallbackRenderSnapshot(renderServiceId) {
+    const service = await renderApiService.getService(renderServiceId);
+    return {
+      service,
+      latestDeploy: null,
+      envVars: null,
+      domains: null,
+      syncedAt: new Date().toISOString(),
+    };
   }
 
   /**
@@ -419,8 +440,13 @@ class HostingService {
   /**
    * Save settings locally after a successful Render update.
    * Merges incoming fields into environmentConfiguration.
+   * @param {string} deploymentId
+   * @param {object} incoming - The settings that were sent to Render
+   * @param {object|null} renderResponse - Render API response (if any)
+   * @param {object} [options] - Optional overrides
+   * @param {string} [options.logMessage] - Custom log message
    */
-  async saveLocalSettings(deploymentId, incoming = {}, renderResponse = null) {
+  async saveLocalSettings(deploymentId, incoming = {}, renderResponse = null, options = {}) {
     return mutateHostingStore((store) => {
       const stored = this._find(store, deploymentId);
       if (!stored) return null;
@@ -442,7 +468,8 @@ class HostingService {
       stored.lastRenderSyncedAt = nowIso();
       stored.updatedAt = nowIso();
 
-      appendHostingLog(store, stored.deploymentId, 'Deploy settings updated on Render and saved locally.', 'ok');
+      const logMsg = options.logMessage || 'Deploy settings updated on Render and saved locally.';
+      appendHostingLog(store, stored.deploymentId, logMsg, 'ok');
       return stored;
     });
   }
@@ -641,6 +668,7 @@ function appendHostingLog(store, deploymentId, message, level = 'info') {
     id: `log_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`,
     level,
     message,
+    source: 'glondiasites',
     timestamp: nowIso(),
     createdAt: nowIso(),
   };

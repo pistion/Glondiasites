@@ -215,6 +215,26 @@ export async function updateHostingSettings(deploymentId, input) {
   notifyDataChanged();
   return service;
 }
+export async function updateHostingDeploySettings(deploymentId, input) {
+  const service = await hostingRequest(`/hosting/${deploymentId}/deploy-settings`, { method: 'PATCH', body: JSON.stringify(input) });
+  notifyDataChanged();
+  return service;
+}
+export async function updateHostingBuildSettings(deploymentId, input) {
+  const service = await hostingRequest(`/hosting/${deploymentId}/build-settings`, { method: 'PATCH', body: JSON.stringify(input) });
+  notifyDataChanged();
+  return service;
+}
+export async function updateHostingSourceSettings(deploymentId, input) {
+  const service = await hostingRequest(`/hosting/${deploymentId}/source-settings`, { method: 'PATCH', body: JSON.stringify(input) });
+  notifyDataChanged();
+  return service;
+}
+export async function redeployHostingWithSettings(deploymentId, input) {
+  const service = await hostingRequest(`/hosting/${deploymentId}/redeploy-with-settings`, { method: 'POST', body: JSON.stringify(input) });
+  notifyDataChanged();
+  return service;
+}
 export async function suspendHostingDeployment(deploymentId) {
   const service = await hostingRequest(`/hosting/${deploymentId}/suspend`, { method: 'POST' });
   notifyDataChanged();

@@ -152,6 +152,174 @@ class RenderApiService {
     return this.request(`/services/${encodeURIComponent(serviceId)}/custom-domains/${encodeURIComponent(domainId)}`, { method: 'DELETE' });
   }
 
+  // ── Typed Service Creation ───────────────────────────────────────────────────
+
+  /**
+   * Create a Render static site with proper defaults and validation.
+   */
+  async createStaticSite(input = {}) {
+    this.assertConfigured('create_static_site');
+
+    this.validateDeployPayload({
+      ...input,
+      serviceType: 'static_site',
+    });
+
+    return this.createService({
+      ...input,
+      serviceType: 'static_site',
+      buildCommand: input.buildCommand || 'npm run build',
+      outputDirectory: input.outputDirectory || input.publishDirectory || 'dist',
+    });
+  }
+
+  /**
+   * Create a Render web service with proper runtime/start command defaults.
+   */
+  async createWebService(input = {}) {
+    this.assertConfigured('create_web_service');
+
+    this.validateDeployPayload({
+      ...input,
+      serviceType: 'web_service',
+    });
+
+    return this.createService({
+      ...input,
+      serviceType: 'web_service',
+      runtime: input.runtime || input.env || 'node',
+      buildCommand: input.buildCommand || 'npm install && npm run build',
+      startCommand: input.startCommand || 'npm start',
+    });
+  }
+
+  // ── Validation & Schema ─────────────────────────────────────────────────────
+
+  /**
+   * Validate deploy configuration before sending to Render.
+   * Catches missing or dangerous settings early.
+   */
+  validateDeployPayload(input = {}) {
+    const serviceType = input.serviceType || inferServiceType(input);
+    const schema = this.getDeployConfigSchema(serviceType);
+    const errors = [];
+
+    const sourceRepository =
+      input.sourceRepository ||
+      input.repoUrl ||
+      input.repositoryUrl ||
+      input.repo ||
+      '';
+
+    const serviceName = input.serviceName || input.name || input.slug || '';
+
+    if (!serviceName) errors.push({ field: 'serviceName', message: 'Service name is required.' });
+    if (!sourceRepository) errors.push({ field: 'sourceRepository', message: 'Source repository is required.' });
+
+    if (!input.branch && !input.productionBranch) {
+      errors.push({ field: 'branch', message: 'Branch is required.' });
+    }
+
+    if (String(input.rootDirectory || '').includes('/opt/render/project')) {
+      errors.push({
+        field: 'rootDirectory',
+        message: 'Root directory must be a repository path, not a local Render filesystem path.',
+      });
+    }
+
+    if (serviceType === 'static_site') {
+      if (!input.buildCommand) {
+        errors.push({ field: 'buildCommand', message: 'Static site build command is required.' });
+      }
+
+      if (!(input.publishDirectory || input.outputDirectory)) {
+        errors.push({ field: 'publishDirectory', message: 'Static site publish directory is required.' });
+      }
+    }
+
+    if (serviceType === 'web_service') {
+      if (!input.buildCommand) {
+        errors.push({ field: 'buildCommand', message: 'Web service build command is required.' });
+      }
+
+      if (!input.startCommand) {
+        errors.push({ field: 'startCommand', message: 'Web service start command is required.' });
+      }
+    }
+
+    if (errors.length) {
+      const error = new Error('Render deploy configuration is incomplete.');
+      error.status = 400;
+      error.code = 'RENDER_DEPLOY_CONFIG_INVALID';
+      error.details = { errors, schema };
+      error.expose = true;
+      throw error;
+    }
+
+    return {
+      valid: true,
+      serviceType,
+      schema,
+      sourceRepository,
+      serviceName,
+    };
+  }
+
+  /**
+   * Structured schema for deploy configuration fields per service type.
+   * Used by frontend to render the correct form and by backend for validation.
+   */
+  getDeployConfigSchema(serviceType = 'static_site') {
+    const type = String(serviceType || 'static_site');
+
+    const common = {
+      serviceName: { required: true, label: 'Service name' },
+      sourceRepository: { required: true, label: 'Source repository' },
+      branch: { required: true, defaultValue: 'main', label: 'Branch' },
+      rootDirectory: { required: false, label: 'Root directory' },
+      plan: { required: false, defaultValue: 'starter', label: 'Plan' },
+      region: { required: false, defaultValue: 'oregon', label: 'Region' },
+    };
+
+    if (type === 'web_service') {
+      return {
+        serviceType: 'web_service',
+        required: ['serviceName', 'sourceRepository', 'branch', 'buildCommand', 'startCommand', 'runtime'],
+        fields: {
+          ...common,
+          runtime: { required: true, defaultValue: 'node', label: 'Runtime' },
+          buildCommand: { required: true, defaultValue: 'npm install && npm run build', label: 'Build command' },
+          startCommand: { required: true, defaultValue: 'npm start', label: 'Start command' },
+          healthCheckPath: { required: false, defaultValue: '/', label: 'Health check path' },
+        },
+      };
+    }
+
+    if (type === 'docker') {
+      return {
+        serviceType: 'docker',
+        required: ['serviceName', 'sourceRepository', 'branch'],
+        fields: {
+          ...common,
+          dockerfilePath: { required: false, defaultValue: './Dockerfile', label: 'Dockerfile path' },
+          dockerContext: { required: false, defaultValue: '.', label: 'Docker context' },
+        },
+        advanced: true,
+      };
+    }
+
+    return {
+      serviceType: 'static_site',
+      required: ['serviceName', 'sourceRepository', 'branch', 'buildCommand', 'publishDirectory'],
+      fields: {
+        ...common,
+        buildCommand: { required: true, defaultValue: 'npm run build', label: 'Build command' },
+        publishDirectory: { required: true, defaultValue: 'dist', label: 'Publish directory' },
+        pullRequestPreviewsEnabled: { required: false, defaultValue: 'no', label: 'Pull request previews' },
+      },
+    };
+  }
+
   // ── High-Level Settings Updates ──────────────────────────────────────────────
 
   /**
@@ -446,8 +614,8 @@ function buildWebServiceUpdatePayload(input = {}) {
 
 function buildSourceUpdatePayload(input = {}) {
   return cleanObject({
-    ...(input.repoUrl || input.repositoryUrl || input.repo
-      ? { repo: input.repoUrl || input.repositoryUrl || input.repo }
+    ...(input.repoUrl || input.repositoryUrl || input.repo || input.sourceRepository
+      ? { repo: input.repoUrl || input.repositoryUrl || input.repo || input.sourceRepository }
       : {}),
 
     ...(input.branch

@@ -63,14 +63,44 @@ export function BuilderImport({ mode = 'github', navigate }) {
   const [zipNotice, setZipNotice] = useStateB('');
   const [dragging, setDragging] = useStateB(false);
   const [importPhase, setImportPhase] = useStateB(mode === 'zip' ? 'idle' : 'idle');
-  const [renderConfig, setRenderConfig] = useStateB({ frontendRootDirectory: '', frontendBuildCommand: 'npm run build', frontendPublishDirectory: 'dist', backendRootDirectory: 'server', backendBuildCommand: 'npm install', backendStartCommand: 'npm start', serviceType: 'static_site', plan: 'starter', repoUrl: '' });
+  const [renderConfig, setRenderConfig] = useStateB({ serviceName: '', frontendRootDirectory: '', frontendBuildCommand: 'npm run build', frontendPublishDirectory: 'dist', backendRootDirectory: 'server', backendBuildCommand: 'npm install && npm run build', backendStartCommand: 'npm start', serviceType: 'static_site', plan: 'starter', region: 'oregon', runtime: 'node', healthCheckPath: '/', repoUrl: '' });
   const [zipConfig, setZipConfig] = useStateB(null);
+  const [showAdvanced, setShowAdvanced] = useStateB(false);
+  const [showReview, setShowReview] = useStateB(false);
   const phaseTimer = React.useRef(null);
   const fileInputRef = React.useRef(null);
   const detectedRepo = parseGithubRepo(repoUrl);
   const isImporting = ['pulling', 'uploading', 'building'].includes(importPhase);
   const importStarted = ['pulling', 'uploading', 'building', 'complete', 'error'].includes(importPhase);
   const isStaticSite = renderConfig.serviceType === 'static_site';
+
+  // Validation
+  const validationErrors = React.useMemo(() => {
+    const errors = [];
+    if (!renderConfig.serviceName.trim() && activeMode === 'github' && detectedRepo) {
+      // Auto-fill from repo name is ok
+    } else if (!renderConfig.serviceName.trim() && activeMode === 'zip' && zipFile) {
+      // Auto-fill from zip name is ok
+    }
+    const effectiveSource = activeMode === 'github' ? repoUrl : renderConfig.repoUrl;
+    if (activeMode === 'zip' && !effectiveSource.trim() && zipConfig && !zipConfig.renderSourceRepoConfigured) {
+      errors.push({ field: 'sourceRepository', message: 'Source repository is required for Render deployment.' });
+    }
+    if (isStaticSite) {
+      if (!renderConfig.frontendBuildCommand.trim()) errors.push({ field: 'buildCommand', message: 'Build command is required.' });
+      if (!renderConfig.frontendPublishDirectory.trim()) errors.push({ field: 'publishDirectory', message: 'Publish directory is required.' });
+    } else {
+      if (!renderConfig.backendBuildCommand.trim()) errors.push({ field: 'buildCommand', message: 'Build command is required.' });
+      if (!renderConfig.backendStartCommand.trim()) errors.push({ field: 'startCommand', message: 'Start command is required.' });
+    }
+    const rootDir = isStaticSite ? renderConfig.frontendRootDirectory : renderConfig.backendRootDirectory;
+    if (rootDir.includes('/opt/render/project')) {
+      errors.push({ field: 'rootDirectory', message: 'Root directory cannot be a local Render server path.' });
+    }
+    return errors;
+  }, [renderConfig, activeMode, repoUrl, zipConfig, zipFile, detectedRepo, isStaticSite]);
+  const configValid = validationErrors.length === 0;
+  const fieldError = (field) => validationErrors.find((e) => e.field === field)?.message;
 
   const updateRepoUrl = (value) => { setRepoUrl(value); setGitError(null); if (!gitBusy) setImportPhase(value.trim() ? (parseGithubRepo(value) ? 'detected' : 'checking') : 'idle'); };
   const updateRenderConfig = (key, value) => setRenderConfig((current) => ({ ...current, [key]: value }));
@@ -105,7 +135,8 @@ export function BuilderImport({ mode = 'github', navigate }) {
       const rootDirectory = isStaticSite ? renderConfig.frontendRootDirectory : renderConfig.backendRootDirectory;
       const buildCommand = isStaticSite ? renderConfig.frontendBuildCommand : renderConfig.backendBuildCommand;
       const outputDirectory = isStaticSite ? renderConfig.frontendPublishDirectory : '';
-      const site = await importBuilderSiteFromGithub({ repoUrl, branch: repoBranch || 'main', rootDirectory, buildCommand, outputDirectory, renderConfig: { provider: 'render', serviceType: renderConfig.serviceType, plan: renderConfig.plan, frontend: { rootDirectory: renderConfig.frontendRootDirectory, buildCommand: renderConfig.frontendBuildCommand, publishDirectory: renderConfig.frontendPublishDirectory }, backend: { rootDirectory: renderConfig.backendRootDirectory, buildCommand: renderConfig.backendBuildCommand, startCommand: renderConfig.backendStartCommand }, selected: isStaticSite ? { rootDirectory: renderConfig.frontendRootDirectory, buildCommand: renderConfig.frontendBuildCommand, publishDirectory: renderConfig.frontendPublishDirectory } : { rootDirectory: renderConfig.backendRootDirectory, buildCommand: renderConfig.backendBuildCommand, startCommand: renderConfig.backendStartCommand } } });
+      const effectiveName = renderConfig.serviceName.trim() || (detectedRepo ? detectedRepo.repo : 'glondia-site');
+      const site = await importBuilderSiteFromGithub({ repoUrl, branch: repoBranch || 'main', rootDirectory, buildCommand, outputDirectory, renderConfig: { provider: 'render', serviceType: renderConfig.serviceType, plan: renderConfig.plan, region: renderConfig.region, serviceName: effectiveName, frontend: { rootDirectory: renderConfig.frontendRootDirectory, buildCommand: renderConfig.frontendBuildCommand, publishDirectory: renderConfig.frontendPublishDirectory }, backend: { rootDirectory: renderConfig.backendRootDirectory, buildCommand: renderConfig.backendBuildCommand, startCommand: renderConfig.backendStartCommand, runtime: renderConfig.runtime, healthCheckPath: renderConfig.healthCheckPath }, selected: isStaticSite ? { rootDirectory: renderConfig.frontendRootDirectory, buildCommand: renderConfig.frontendBuildCommand, publishDirectory: renderConfig.frontendPublishDirectory } : { rootDirectory: renderConfig.backendRootDirectory, buildCommand: renderConfig.backendBuildCommand, startCommand: renderConfig.backendStartCommand, runtime: renderConfig.runtime, healthCheckPath: renderConfig.healthCheckPath } } });
       clearTimeout(phaseTimer.current); setImportPhase('complete'); window.setTimeout(() => navigate({ view: 'builder-editor', params: { id: site.templateId || null, siteId: site.id } }), 700);
     } catch (err) { setGitError(err.message || 'Failed to connect repository.'); setImportPhase('error'); } finally { setGitBusy(false); }
   };
@@ -114,7 +145,8 @@ export function BuilderImport({ mode = 'github', navigate }) {
     if (!zipFile) { setZipError('Choose or drop a ZIP file first.'); return; }
     setZipBusy(true); setZipError(null); setZipNotice('Uploading ZIP package...'); setImportPhase('uploading'); clearTimeout(phaseTimer.current); phaseTimer.current = setTimeout(() => setImportPhase('building'), 1000);
     try {
-      const result = await deployZipTemplate(zipFile, { siteName: zipFile.name.replace(/\.zip$/i, ''), slug: zipFile.name.replace(/\.zip$/i, ''), serviceType: renderConfig.serviceType, plan: renderConfig.plan, environment: 'production', buildCommand: renderConfig.frontendBuildCommand || 'npm run build', publishDirectory: renderConfig.frontendPublishDirectory || 'dist', repoUrl: renderConfig.repoUrl, branch: repoBranch || 'main', rootDirectory: renderConfig.frontendRootDirectory });
+      const effectiveZipName = renderConfig.serviceName.trim() || zipFile.name.replace(/\.zip$/i, '');
+      const result = await deployZipTemplate(zipFile, { siteName: effectiveZipName, slug: effectiveZipName, serviceName: effectiveZipName, serviceType: renderConfig.serviceType, plan: renderConfig.plan, region: renderConfig.region, environment: 'production', buildCommand: isStaticSite ? (renderConfig.frontendBuildCommand || 'npm run build') : (renderConfig.backendBuildCommand || 'npm install && npm run build'), publishDirectory: renderConfig.frontendPublishDirectory || 'dist', startCommand: isStaticSite ? undefined : renderConfig.backendStartCommand, runtime: isStaticSite ? undefined : renderConfig.runtime, healthCheckPath: isStaticSite ? undefined : renderConfig.healthCheckPath, repoUrl: renderConfig.repoUrl, branch: repoBranch || 'main', rootDirectory: isStaticSite ? renderConfig.frontendRootDirectory : renderConfig.backendRootDirectory });
       clearTimeout(phaseTimer.current); setImportPhase('complete'); setZipNotice('ZIP uploaded. Opening Hosting detail...'); window.setTimeout(() => navigate({ view: 'hosting-detail', params: { id: result.deploymentId } }), 700);
     } catch (err) { setZipError(err.message || 'ZIP upload failed.'); setZipNotice(''); setImportPhase('error'); } finally { setZipBusy(false); }
   };
@@ -159,7 +191,60 @@ export function BuilderImport({ mode = 'github', navigate }) {
             <button className="btn btn-primary" style={{ width: '100%', marginTop: 12 }} onClick={handleZipDeploy} disabled={zipBusy || !zipFile}><ICN.Rocket size={14} /> {zipBusy ? 'Uploading...' : zipFile ? 'Deploy ZIP' : 'Choose ZIP first'}</button>
           </div>
         )}
-        <div className="render-config-panel"><div><div className="eyebrow">Render deployment payload</div><h3>Service settings</h3></div><div className="render-config-grid render-config-grid--compact render-config-service-row"><label><span>Service type</span><select className="input" value={renderConfig.serviceType} onChange={(e) => updateServiceType(e.target.value)}><option value="static_site">Static Site</option><option value="web_service">Web Service</option></select></label><label><span>Plan</span><input className="input mono" value={renderConfig.plan} onChange={(e) => updateRenderConfig('plan', e.target.value)} /></label></div><div><h3>{isStaticSite ? 'Static site settings' : 'Web service settings'}</h3></div><div className="render-config-grid"><label><span>{isStaticSite ? 'Root directory' : 'Service root'}</span><input className="input mono" value={isStaticSite ? renderConfig.frontendRootDirectory : renderConfig.backendRootDirectory} onChange={(e) => updateRenderConfig(isStaticSite ? 'frontendRootDirectory' : 'backendRootDirectory', e.target.value)} placeholder={isStaticSite ? './' : 'server'} /></label><label><span>Build command</span><input className="input mono" value={isStaticSite ? renderConfig.frontendBuildCommand : renderConfig.backendBuildCommand} onChange={(e) => updateRenderConfig(isStaticSite ? 'frontendBuildCommand' : 'backendBuildCommand', e.target.value)} /></label>{isStaticSite ? <label><span>Publish directory</span><input className="input mono" value={renderConfig.frontendPublishDirectory} onChange={(e) => updateRenderConfig('frontendPublishDirectory', e.target.value)} /></label> : <label><span>Start command</span><input className="input mono" value={renderConfig.backendStartCommand} onChange={(e) => updateRenderConfig('backendStartCommand', e.target.value)} /></label>}</div>{activeMode === 'zip' && <div style={{ marginTop: 12 }}><div className="label">Optional generated-sites repository</div><input className="input mono" value={renderConfig.repoUrl} onChange={(e) => updateRenderConfig('repoUrl', e.target.value)} placeholder="https://github.com/your-org/generated-sites" /><div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Leave blank to use RENDER_GENERATED_SITES_REPO_URL.</div></div>}</div>
+        <div className="render-config-panel">
+          <div><div className="eyebrow">Deploy Configuration</div><h3>Basic Settings</h3></div>
+          <div className="render-config-grid render-config-grid--compact">
+            <label><span>Service name</span><input className="input mono" value={renderConfig.serviceName} onChange={(e) => updateRenderConfig('serviceName', e.target.value)} placeholder={activeMode === 'zip' && zipFile ? zipFile.name.replace(/\.zip$/i, '') : detectedRepo ? detectedRepo.repo : 'my-site'} /></label>
+            <label><span>Service type</span><select className="input" value={renderConfig.serviceType} onChange={(e) => updateServiceType(e.target.value)}><option value="static_site">Static Site</option><option value="web_service">Web Service</option></select></label>
+            <label><span>Plan</span><input className="input mono" value={renderConfig.plan} onChange={(e) => updateRenderConfig('plan', e.target.value)} /></label>
+            <label><span>Region</span><select className="input" value={renderConfig.region} onChange={(e) => updateRenderConfig('region', e.target.value)}><option value="oregon">Oregon (US West)</option><option value="ohio">Ohio (US East)</option><option value="frankfurt">Frankfurt (EU)</option><option value="singapore">Singapore (Asia)</option></select></label>
+          </div>
+
+          <div style={{ marginTop: 16 }}><h3>Source Settings</h3></div>
+          <div className="render-config-grid">
+            {activeMode === 'zip' && <label><span>Source repository {fieldError('sourceRepository') && <span style={{ color: 'var(--danger)', fontSize: 11, fontWeight: 400 }}> — {fieldError('sourceRepository')}</span>}</span><input className="input mono" value={renderConfig.repoUrl} onChange={(e) => updateRenderConfig('repoUrl', e.target.value)} placeholder="https://github.com/your-org/generated-sites" /><span className="muted" style={{ fontSize: 11 }}>Render deploys from this repo. Leave blank to use server default.</span></label>}
+            {activeMode === 'github' && <label><span>Source repository</span><input className="input mono" value={repoUrl} disabled style={{ opacity: 0.7 }} /></label>}
+            <label><span>Branch</span><input className="input mono" value={repoBranch} onChange={(e) => setRepoBranch(e.target.value)} placeholder="main" /></label>
+            <label><span>Root directory {fieldError('rootDirectory') && <span style={{ color: 'var(--danger)', fontSize: 11, fontWeight: 400 }}> — {fieldError('rootDirectory')}</span>}</span><input className="input mono" value={isStaticSite ? renderConfig.frontendRootDirectory : renderConfig.backendRootDirectory} onChange={(e) => updateRenderConfig(isStaticSite ? 'frontendRootDirectory' : 'backendRootDirectory', e.target.value)} placeholder={isStaticSite ? './' : 'server'} /><span className="muted" style={{ fontSize: 11 }}>Must be a repo path, not /opt/render/project/...</span></label>
+          </div>
+
+          <div style={{ marginTop: 16 }}><h3>{isStaticSite ? 'Build Settings' : 'Build & Runtime Settings'}</h3></div>
+          <div className="render-config-grid">
+            {!isStaticSite && <label><span>Runtime</span><select className="input" value={renderConfig.runtime} onChange={(e) => updateRenderConfig('runtime', e.target.value)}><option value="node">Node</option><option value="python">Python</option><option value="go">Go</option><option value="rust">Rust</option><option value="ruby">Ruby</option><option value="elixir">Elixir</option></select></label>}
+            <label><span>Build command {fieldError('buildCommand') && <span style={{ color: 'var(--danger)', fontSize: 11, fontWeight: 400 }}> — required</span>}</span><input className="input mono" value={isStaticSite ? renderConfig.frontendBuildCommand : renderConfig.backendBuildCommand} onChange={(e) => updateRenderConfig(isStaticSite ? 'frontendBuildCommand' : 'backendBuildCommand', e.target.value)} /></label>
+            {isStaticSite ? (
+              <label><span>Publish directory {fieldError('publishDirectory') && <span style={{ color: 'var(--danger)', fontSize: 11, fontWeight: 400 }}> — required</span>}</span><input className="input mono" value={renderConfig.frontendPublishDirectory} onChange={(e) => updateRenderConfig('frontendPublishDirectory', e.target.value)} /></label>
+            ) : (<>
+              <label><span>Start command {fieldError('startCommand') && <span style={{ color: 'var(--danger)', fontSize: 11, fontWeight: 400 }}> — required</span>}</span><input className="input mono" value={renderConfig.backendStartCommand} onChange={(e) => updateRenderConfig('backendStartCommand', e.target.value)} /></label>
+              <label><span>Health check path</span><input className="input mono" value={renderConfig.healthCheckPath} onChange={(e) => updateRenderConfig('healthCheckPath', e.target.value)} placeholder="/" /></label>
+              <div className="muted" style={{ fontSize: 11, padding: '4px 0' }}>Your app must listen on process.env.PORT and bind to 0.0.0.0.</div>
+            </>)}
+          </div>
+
+          <button className="btn btn-outline btn-sm" style={{ marginTop: 14, fontSize: 12 }} onClick={() => setShowAdvanced(!showAdvanced)}>{showAdvanced ? '▾ Hide advanced' : '▸ Advanced settings'}</button>
+          {showAdvanced && (
+            <div className="render-config-grid" style={{ marginTop: 10 }}>
+              {isStaticSite && <label><span>Pull request previews</span><select className="input" value={renderConfig.pullRequestPreviews || 'no'} onChange={(e) => updateRenderConfig('pullRequestPreviews', e.target.value)}><option value="no">Disabled</option><option value="yes">Enabled</option></select></label>}
+              <div className="muted" style={{ fontSize: 11, padding: '4px 0' }}>Database add-ons: Coming soon</div>
+            </div>
+          )}
+
+          {configValid && (activeMode === 'zip' ? zipFile : detectedRepo) && (
+            <div className="card" style={{ marginTop: 14, padding: 10, background: 'var(--bg-deep)', fontSize: 12 }}>
+              <div style={{ fontWeight: 600, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ color: 'var(--accent)' }}>✓</span> Ready to deploy</div>
+              <div className="mono" style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '2px 10px' }}>
+                <span className="muted">Type:</span><span>{isStaticSite ? 'Static Site' : 'Web Service'}</span>
+                <span className="muted">Source:</span><span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{activeMode === 'github' ? repoUrl : renderConfig.repoUrl || '(server default)'}</span>
+                <span className="muted">Branch:</span><span>{repoBranch || 'main'}</span>
+                {(isStaticSite ? renderConfig.frontendRootDirectory : renderConfig.backendRootDirectory) && <><span className="muted">Root:</span><span>{isStaticSite ? renderConfig.frontendRootDirectory : renderConfig.backendRootDirectory}</span></>}
+                <span className="muted">Build:</span><span>{isStaticSite ? renderConfig.frontendBuildCommand : renderConfig.backendBuildCommand}</span>
+                {isStaticSite ? <><span className="muted">Publish:</span><span>{renderConfig.frontendPublishDirectory}</span></> : <><span className="muted">Start:</span><span>{renderConfig.backendStartCommand}</span></>}
+                <span className="muted">Plan:</span><span>{renderConfig.plan}</span>
+                <span className="muted">Region:</span><span>{renderConfig.region}</span>
+              </div>
+            </div>
+          )}
+        </div>
       </div><div className="bld-preview"><ImportProgressPreview phase={importPhase} repo={detectedRepo} branch={repoBranch || 'main'} error={activeError} showLoader={importStarted} isImporting={isImporting} zipFile={activeMode === 'zip' ? zipFile : null} /></div></div></div>
     </>
   );
