@@ -7,6 +7,7 @@ const router = express.Router();
 router.use(authMiddleware);
 router.get('/', hostingController.listHosting);
 router.get('/:deploymentId', hostingController.getHostingService);
+router.post('/:deploymentId/sync', hostingController.syncHostingService);
 router.patch('/:deploymentId/settings', hostingController.updateSettings);
 router.post('/:deploymentId/suspend', hostingController.suspendHostingService);
 router.delete('/:deploymentId', hostingController.deleteHostingService);
