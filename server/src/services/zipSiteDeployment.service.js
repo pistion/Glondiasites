@@ -3,7 +3,7 @@ import { join, resolve } from 'node:path';
 import AdmZip from 'adm-zip';
 import { makeId, mutateHostingStore, nowIso } from './hostingStore.js';
 import renderApiService from './renderApiService.js';
-import { publishGeneratedSiteToGitHub, resolveGitHubPublisherToken } from './githubGeneratedSitePublisher.service.js';
+import { publishGeneratedSiteToGitHub, resolveGitHubPublisherToken, verifyGitHubAccess } from './githubGeneratedSitePublisher.service.js';
 
 // ── Provider constants ──────────────────────────────────────────────────────
 // ZIP uploads are website/app hosting → always Render.
@@ -146,25 +146,36 @@ function resolveRenderSourceRepo(input = {}) {
 // Config diagnostics — used by GET /api/template-ai/zip/settings
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function getZipDeployConfigStatus() {
+export async function getZipDeployConfigStatus() {
   const { token: ghToken, error: ghError } = resolveGitHubPublisherToken();
 
   const renderApiConfigured = renderApiService.configured();
-  const renderSourceRepoConfigured = Boolean(
-    (process.env.RENDER_GENERATED_SITES_REPO_URL || process.env.GENERATED_SITES_REPO_URL || '').trim()
-  );
+  const sourceRepo = (process.env.RENDER_GENERATED_SITES_REPO_URL || process.env.GENERATED_SITES_REPO_URL || '').trim();
+  const renderSourceRepoConfigured = Boolean(sourceRepo);
   const githubPublisherConfigured = Boolean(ghToken && !ghError);
+
+  // If both token and repo are set, verify actual access (catches permission issues)
+  let githubAccessOk = null;
+  let githubAccessError = null;
+  if (githubPublisherConfigured && renderSourceRepoConfigured) {
+    const check = await verifyGitHubAccess(sourceRepo);
+    githubAccessOk = check.ok;
+    githubAccessError = check.error || null;
+  }
 
   const missing = [];
   if (!renderApiConfigured) missing.push('RENDER_API_KEY and/or RENDER_OWNER_ID');
   if (!renderSourceRepoConfigured) missing.push('RENDER_GENERATED_SITES_REPO_URL');
   if (!githubPublisherConfigured) missing.push('GITHUB_GENERATED_SITES_TOKEN');
+  if (githubAccessOk === false) missing.push('GitHub token permissions (Contents: Read and write)');
 
   return {
     provider: HOSTING_PROVIDER,
     renderApiConfigured,
     renderSourceRepoConfigured,
     githubPublisherConfigured,
+    githubAccessOk,
+    githubAccessError,
     githubTokenError: ghError || null,
     missing,
     expectedEnv: [

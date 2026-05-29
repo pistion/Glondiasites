@@ -144,8 +144,12 @@ export function BuilderImport({ mode = 'github', navigate }) {
                   <div><span style={{ color: zipConfig.renderApiConfigured ? 'var(--accent)' : 'var(--danger)' }}>{zipConfig.renderApiConfigured ? '✓' : '✗'}</span> Render API: {zipConfig.renderApiConfigured ? 'configured' : 'not configured'}</div>
                   <div><span style={{ color: (zipConfig.renderSourceRepoConfigured || renderConfig.repoUrl.trim()) ? 'var(--accent)' : 'var(--danger)' }}>{(zipConfig.renderSourceRepoConfigured || renderConfig.repoUrl.trim()) ? '✓' : '✗'}</span> Generated source repo: {zipConfig.renderSourceRepoConfigured ? 'configured' : renderConfig.repoUrl.trim() ? 'set below' : 'not configured'}</div>
                   <div><span style={{ color: zipConfig.githubPublisherConfigured ? 'var(--accent)' : 'var(--danger)' }}>{zipConfig.githubPublisherConfigured ? '✓' : '✗'}</span> GitHub publisher token: {zipConfig.githubPublisherConfigured ? 'configured' : 'not configured'}</div>
+                  {zipConfig.githubAccessOk !== null && (
+                    <div><span style={{ color: zipConfig.githubAccessOk ? 'var(--accent)' : 'var(--danger)' }}>{zipConfig.githubAccessOk ? '✓' : '✗'}</span> GitHub repo access: {zipConfig.githubAccessOk ? 'verified' : 'permission denied'}</div>
+                  )}
                 </div>
                 {zipConfig.githubTokenError && <div style={{ marginTop: 6, color: 'var(--danger)', fontSize: 12 }}>{zipConfig.githubTokenError}</div>}
+                {zipConfig.githubAccessError && <div style={{ marginTop: 6, color: 'var(--danger)', fontSize: 12 }}>{zipConfig.githubAccessError}</div>}
                 {zipConfig.missing?.length > 0 && <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>Missing: {zipConfig.missing.join(', ')}</div>}
               </div>
             )}

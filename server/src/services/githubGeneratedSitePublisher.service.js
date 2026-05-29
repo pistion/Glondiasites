@@ -59,6 +59,46 @@ export function githubPublisherConfigured(repoUrl = '') {
   return Boolean(parseGitHubRepoUrl(repoUrl) && token && !error);
 }
 
+/**
+ * Verify that the token can access a repo before publishing files.
+ * Makes a lightweight GET to the repo metadata endpoint.
+ * Returns { ok, error }.
+ */
+export async function verifyGitHubAccess(repoUrl) {
+  const parsed = parseGitHubRepoUrl(repoUrl);
+  if (!parsed) return { ok: false, error: 'Invalid GitHub repository URL.' };
+
+  const { token, error: tokenError } = resolveGitHubPublisherToken();
+  if (tokenError) return { ok: false, error: tokenError };
+
+  try {
+    const url = `https://api.github.com/repos/${encodeURIComponent(parsed.owner)}/${encodeURIComponent(parsed.repo)}`;
+    const response = await fetch(url, { headers: githubHeaders(token) });
+    if (response.status === 404) {
+      return { ok: false, error: `Repository ${parsed.owner}/${parsed.repo} not found — check the repo URL and token scope.` };
+    }
+    if (response.status === 403) {
+      const body = await response.json().catch(() => ({}));
+      const msg = body?.message || '';
+      if (msg.includes('not accessible by personal access token')) {
+        return { ok: false, error: `GitHub token cannot access ${parsed.owner}/${parsed.repo}. The fine-grained PAT needs "Contents: Read and write" permission on this repo. Go to GitHub → Settings → Developer settings → Fine-grained tokens → edit the token → Repository permissions → Contents → Read and write.` };
+      }
+      return { ok: false, error: `GitHub returned 403 for ${parsed.owner}/${parsed.repo}: ${msg || 'access denied'}. Check token permissions.` };
+    }
+    if (!response.ok) {
+      return { ok: false, error: `GitHub returned ${response.status} for ${parsed.owner}/${parsed.repo}.` };
+    }
+    // Check push access from the repo permissions object
+    const repo = await response.json().catch(() => ({}));
+    if (repo.permissions && !repo.permissions.push) {
+      return { ok: false, error: `GitHub token has read access to ${parsed.owner}/${parsed.repo} but NOT push/write access. The fine-grained PAT needs "Contents: Read and write" permission.` };
+    }
+    return { ok: true, error: null };
+  } catch (err) {
+    return { ok: false, error: `GitHub access check failed: ${err.message}` };
+  }
+}
+
 export async function publishGeneratedSiteToGitHub({
   siteDir,
   repoUrl,
@@ -73,12 +113,19 @@ export async function publishGeneratedSiteToGitHub({
   if (tokenError) return { attempted: false, skippedReason: tokenError };
   if (!siteDir) return { attempted: false, skippedReason: 'Generated site directory is missing.' };
 
+  // Pre-flight: verify the token can access this repo before uploading files
+  const accessCheck = await verifyGitHubAccess(repoUrl);
+  if (!accessCheck.ok) {
+    return { attempted: false, skippedReason: accessCheck.error };
+  }
+
   const files = await listFiles(siteDir);
   if (files.length === 0) return { attempted: false, skippedReason: 'Generated site directory contains no files to publish.' };
 
   const published = [];
   const errors = [];
   const safeRoot = cleanPath(targetRoot);
+  let consecutivePermErrors = 0;
 
   for (const filePath of files) {
     const relativePath = relative(siteDir, filePath).replace(/\\/g, '/');
@@ -97,8 +144,20 @@ export async function publishGeneratedSiteToGitHub({
         message: `${commitMessage}: ${repoPath}`,
       });
       published.push(repoPath);
+      consecutivePermErrors = 0;
     } catch (error) {
       errors.push({ path: repoPath, message: error.message });
+      // Abort early on permission errors — no point retrying every file
+      if (isPermissionError(error.message)) {
+        consecutivePermErrors++;
+        if (consecutivePermErrors >= 2) {
+          errors.push({
+            path: '(aborted)',
+            message: `Stopped after ${errors.length} consecutive permission errors. The GitHub token lacks "Contents: Read and write" permission on ${parsed.owner}/${parsed.repo}. Go to GitHub → Settings → Developer settings → Fine-grained tokens → edit the token → Repository permissions → Contents → Read and write.`,
+          });
+          break;
+        }
+      }
     }
   }
 
@@ -111,6 +170,15 @@ export async function publishGeneratedSiteToGitHub({
     publishedCount: published.length,
     errors,
   };
+}
+
+/** True when a GitHub error message indicates a token permission problem. */
+function isPermissionError(message = '') {
+  const lower = (message || '').toLowerCase();
+  return lower.includes('not accessible by personal access token')
+    || lower.includes('resource not accessible')
+    || lower.includes('must have push access')
+    || lower.includes('permission');
 }
 
 async function listFiles(dir) {
