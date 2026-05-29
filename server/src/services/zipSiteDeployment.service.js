@@ -1,4 +1,5 @@
 import { mkdir, rm, writeFile, readFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import AdmZip from 'adm-zip';
 import { makeId, mutateHostingStore, nowIso } from './hostingStore.js';
@@ -61,11 +62,39 @@ const GENERATED_SHELL_FILE = 'glondia-render-build.sh';
 // ── Project type enum ───────────────────────────────────────────────────────
 const PROJECT_TYPE = {
   VITE_SOURCE:     'vite-source',
+  NEXT_SOURCE:     'next-source',
+  CRA_SOURCE:      'cra-source',
+  GATSBY_SOURCE:   'gatsby-source',
+  VUE_SOURCE:      'vue-source',
+  SVELTE_SOURCE:   'svelte-source',
+  ASTRO_SOURCE:    'astro-source',
+  REMIX_SOURCE:    'remix-source',
+  NODE_SERVER:     'node-server',
   NODE_SOURCE:     'node-source',
   STATIC_ROOT:     'static-root-html',
   PREBUILT_DIST:   'prebuilt-dist',
   PREBUILT_BUILD:  'prebuilt-build',
+  PREBUILT_OUT:    'prebuilt-out',
   UNKNOWN:         'unknown',
+};
+
+// ── Framework presets: build cmd, output dir, service type, runtime ─────────
+const FRAMEWORK_PRESETS = {
+  [PROJECT_TYPE.VITE_SOURCE]:    { framework: 'Vite',          buildCommand: 'npm run build', outputDirectory: 'dist',    serviceType: 'static_site' },
+  [PROJECT_TYPE.NEXT_SOURCE]:    { framework: 'Next.js',       buildCommand: 'npm run build', outputDirectory: '.next',   serviceType: 'web_service', startCommand: 'npm start' },
+  [PROJECT_TYPE.CRA_SOURCE]:     { framework: 'Create React App', buildCommand: 'npm run build', outputDirectory: 'build', serviceType: 'static_site' },
+  [PROJECT_TYPE.GATSBY_SOURCE]:  { framework: 'Gatsby',        buildCommand: 'npm run build', outputDirectory: 'public',  serviceType: 'static_site' },
+  [PROJECT_TYPE.VUE_SOURCE]:     { framework: 'Vue CLI',       buildCommand: 'npm run build', outputDirectory: 'dist',    serviceType: 'static_site' },
+  [PROJECT_TYPE.SVELTE_SOURCE]:  { framework: 'SvelteKit',     buildCommand: 'npm run build', outputDirectory: 'build',   serviceType: 'web_service', startCommand: 'node build' },
+  [PROJECT_TYPE.ASTRO_SOURCE]:   { framework: 'Astro',         buildCommand: 'npm run build', outputDirectory: 'dist',    serviceType: 'static_site' },
+  [PROJECT_TYPE.REMIX_SOURCE]:   { framework: 'Remix',         buildCommand: 'npm run build', outputDirectory: 'build',   serviceType: 'web_service', startCommand: 'npm start' },
+  [PROJECT_TYPE.NODE_SERVER]:    { framework: 'Node.js server', buildCommand: 'npm install',  outputDirectory: '.',       serviceType: 'web_service', startCommand: 'npm start' },
+  [PROJECT_TYPE.NODE_SOURCE]:    { framework: 'Node static app', buildCommand: 'npm run build', outputDirectory: 'dist',  serviceType: 'static_site' },
+  [PROJECT_TYPE.STATIC_ROOT]:    { framework: 'Static HTML',   buildCommand: null,            outputDirectory: '.',       serviceType: 'static_site' },
+  [PROJECT_TYPE.PREBUILT_DIST]:  { framework: 'Prebuilt (dist)', buildCommand: null,          outputDirectory: 'dist',    serviceType: 'static_site' },
+  [PROJECT_TYPE.PREBUILT_BUILD]: { framework: 'Prebuilt (build)', buildCommand: null,         outputDirectory: 'build',   serviceType: 'static_site' },
+  [PROJECT_TYPE.PREBUILT_OUT]:   { framework: 'Prebuilt (out)', buildCommand: null,           outputDirectory: 'out',     serviceType: 'static_site' },
+  [PROJECT_TYPE.UNKNOWN]:        { framework: 'Unknown',       buildCommand: null,            outputDirectory: 'dist',    serviceType: 'static_site' },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -164,7 +193,8 @@ export async function deployZipSite(input = {}) {
   const siteName = String(input.siteName || fileName.replace(/\.zip$/i, '') || 'uploaded-site').trim();
   const finalSlug = slugify(input.slug || siteName);
   const branch = input.branch || 'main';
-  const serviceType = input.serviceType || 'static_site';
+  // serviceType resolved after detection — placeholder here, overridden below
+  let serviceType = input.serviceType || null;
   const plan = input.plan || 'starter';
   const environment = input.environment || 'production';
   const deploymentId = makeId('dep');
@@ -184,13 +214,15 @@ export async function deployZipSite(input = {}) {
     console.log(`[zip-deploy] Ignored folder examples: ${extracted.ignoredFolderExamples.join(', ')}`);
   }
 
-  // 2. Detect project type
-  const detected = detectProject(extracted.files);
-  console.log(`[zip-deploy] Detected project type: ${detected.type} (framework: ${detected.framework})`);
+  // 2. Detect project type (deep package.json analysis)
+  const detected = detectProject(extracted.files, siteDir);
+  console.log(`[zip-deploy] Detected: ${detected.type} | framework=${detected.framework} | pm=${detected.packageManager} | serviceType=${detected.detectedServiceType}`);
 
-  // 3. Determine publish directory based on project type
+  // 3. Auto-resolve deployment settings from detection
+  serviceType = resolveServiceType(detected, serviceType);
   const publishDirectory = resolvePublishDirectory(detected, input.publishDirectory);
-  console.log(`[zip-deploy] Publish directory: ${publishDirectory}`);
+  const startCommand = detected.detectedStartCommand || input.startCommand || null;
+  console.log(`[zip-deploy] Resolved: serviceType=${serviceType} publishDir=${publishDirectory}${startCommand ? ` startCmd=${startCommand}` : ''}`);
 
   // 4. Write the deterministic Render build shell file
   const shellFile = await writeRenderShellFile(siteDir, { detected, publishDirectory, requestedBuildCommand: input.buildCommand || '' });
@@ -234,6 +266,8 @@ export async function deployZipSite(input = {}) {
         rootDirectory: renderRootDirectory,
         buildCommand,
         outputDirectory: publishDirectory,
+        startCommand,
+        framework: detected.framework,
         sourceReference: sourceRepo,
       });
       renderServiceId = serviceResponse?.service?.id || serviceResponse?.id || renderServiceId;
@@ -330,7 +364,11 @@ export async function deployZipSite(input = {}) {
         rootDirectory: renderRootDirectory || targetRoot,
         buildCommand,
         outputDirectory: publishDirectory,
+        startCommand,
         framework: detected.framework,
+        detectedProjectType: detected.type,
+        packageManager: detected.packageManager,
+        nodeVersion: detected.nodeVersion || null,
         sourceRepository: sourceRepo || null,
         providerTarget: HOSTING_PROVIDER,
       },
@@ -349,8 +387,8 @@ export async function deployZipSite(input = {}) {
         ? [makeLog(`Ignored folder examples: ${extracted.ignoredFolderExamples.join(', ')}.`, 'info')]
         : []),
       makeLog(`Extracted ${extracted.files.length} deployable files into ${siteDir}.`, 'ok'),
-      makeLog(`Detected project type: ${detected.type} (${detected.framework}).`, 'info'),
-      makeLog(`Publish directory: ${publishDirectory}.`, 'info'),
+      makeLog(`Detected: ${detected.type} | framework=${detected.framework} | pm=${detected.packageManager}${detected.nodeVersion ? ` | node=${detected.nodeVersion}` : ''}.`, 'info'),
+      makeLog(`Auto-resolved: serviceType=${serviceType} | publishDir=${publishDirectory}${startCommand ? ` | startCmd=${startCommand}` : ''}.`, 'info'),
       makeLog(`Render build command: ${buildCommand}.`, 'info'),
       makeLog(`Shell file written: ${shellFile.relativePath}.`, 'ok'),
       makeLog(`Source artifact manifest stored at ${sourceArtifact.manifestPath}.`, 'ok'),
@@ -392,8 +430,9 @@ export async function validateZipSite(input = {}) {
 
   try {
     const extracted = await extractZipSafely(zipBuffer, tmpDir);
-    const detected = detectProject(extracted.files);
+    const detected = detectProject(extracted.files, tmpDir);
     const publishDirectory = resolvePublishDirectory(detected);
+    const serviceType = resolveServiceType(detected);
 
     return {
       valid: true,
@@ -405,7 +444,11 @@ export async function validateZipSite(input = {}) {
       detectedProjectType: detected.type,
       framework: detected.framework,
       packageManager: detected.packageManager,
+      serviceType,
       publishDirectory,
+      buildCommand: detected.detectedBuildCommand || null,
+      startCommand: detected.detectedStartCommand || null,
+      nodeVersion: detected.nodeVersion || null,
       deployableFiles: extracted.files,
       ignoredFiles: extracted.ignoredFiles,
       ignoredFolderExamples: extracted.ignoredFolderExamples,
@@ -501,29 +544,96 @@ async function extractZipSafely(zipBuffer, destination) {
 // Project type detection
 // ─────────────────────────────────────────────────────────────────────────────
 
-function detectProject(files) {
+function detectProject(files, siteDir) {
   const hasPackage     = files.some(n => n === 'package.json');
   const hasViteConfig  = files.some(n => /^vite\.config\.(js|ts|mjs|mts|cjs)$/i.test(n));
+  const hasNextConfig  = files.some(n => /^next\.config\.(js|ts|mjs|mts|cjs)$/i.test(n));
+  const hasGatsbyConf  = files.some(n => /^gatsby-config\.(js|ts|mjs)$/i.test(n));
+  const hasAstroConf   = files.some(n => /^astro\.config\.(js|ts|mjs)$/i.test(n));
+  const hasSvelteConf  = files.some(n => /^svelte\.config\.(js|ts)$/i.test(n));
+  const hasRemixConf   = files.some(n => /^remix\.config\.(js|ts)$/i.test(n));
   const hasRootIndex   = files.some(n => n === 'index.html');
   const hasDistIndex   = files.some(n => n === 'dist/index.html');
   const hasBuildIndex  = files.some(n => n === 'build/index.html');
-  const hasLockFile    = files.some(n => n === 'package-lock.json');
+  const hasOutIndex    = files.some(n => n === 'out/index.html');
+  const hasNpmLock     = files.some(n => n === 'package-lock.json');
+  const hasYarnLock    = files.some(n => n === 'yarn.lock');
+  const hasPnpmLock    = files.some(n => n === 'pnpm-lock.yaml');
+  const hasNvmrc       = files.some(n => n === '.nvmrc');
+  const hasNodeVersion = files.some(n => n === '.node-version');
 
-  if (hasPackage && hasViteConfig) return { type: PROJECT_TYPE.VITE_SOURCE, framework: 'Vite', packageManager: 'npm', hasLockFile };
-  if (hasPackage) return { type: PROJECT_TYPE.NODE_SOURCE, framework: 'Node static app', packageManager: 'npm', hasLockFile };
-  if (hasDistIndex) return { type: PROJECT_TYPE.PREBUILT_DIST, framework: 'Prebuilt (dist)', packageManager: 'none', hasLockFile: false };
-  if (hasBuildIndex) return { type: PROJECT_TYPE.PREBUILT_BUILD, framework: 'Prebuilt (build)', packageManager: 'none', hasLockFile: false };
-  if (hasRootIndex) return { type: PROJECT_TYPE.STATIC_ROOT, framework: 'Static HTML', packageManager: 'none', hasLockFile: false };
-  return { type: PROJECT_TYPE.UNKNOWN, framework: 'Unknown', packageManager: 'none', hasLockFile: false };
+  const packageManager = hasPnpmLock ? 'pnpm' : hasYarnLock ? 'yarn' : 'npm';
+  const hasLockFile = hasNpmLock || hasYarnLock || hasPnpmLock;
+
+  let pkg = null;
+  if (hasPackage && siteDir) {
+    try { pkg = JSON.parse(readFileSync(join(siteDir, 'package.json'), 'utf8')); } catch { /* ignored */ }
+  }
+
+  const allDeps = { ...pkg?.dependencies, ...pkg?.devDependencies };
+  const scripts = pkg?.scripts || {};
+  const nodeVersion = pkg?.engines?.node || null;
+
+  const base = { packageManager, hasLockFile, nodeVersion, hasNvmrc, hasNodeVersion, pkg: pkg ? { name: pkg.name, scripts: Object.keys(scripts), engines: pkg.engines } : null };
+
+  if (hasPackage) {
+    // Config-file detection takes priority — most specific first
+    if (hasNextConfig || allDeps['next'])
+      return { type: PROJECT_TYPE.NEXT_SOURCE, ...presetFor(PROJECT_TYPE.NEXT_SOURCE), ...base };
+
+    if (hasGatsbyConf || allDeps['gatsby'])
+      return { type: PROJECT_TYPE.GATSBY_SOURCE, ...presetFor(PROJECT_TYPE.GATSBY_SOURCE), ...base };
+
+    if (hasAstroConf || allDeps['astro'])
+      return { type: PROJECT_TYPE.ASTRO_SOURCE, ...presetFor(PROJECT_TYPE.ASTRO_SOURCE), ...base };
+
+    if (hasSvelteConf || allDeps['@sveltejs/kit'])
+      return { type: PROJECT_TYPE.SVELTE_SOURCE, ...presetFor(PROJECT_TYPE.SVELTE_SOURCE), ...base };
+
+    if (hasRemixConf || allDeps['@remix-run/node'] || allDeps['@remix-run/react'])
+      return { type: PROJECT_TYPE.REMIX_SOURCE, ...presetFor(PROJECT_TYPE.REMIX_SOURCE), ...base };
+
+    if (hasViteConfig || allDeps['vite'])
+      return { type: PROJECT_TYPE.VITE_SOURCE, ...presetFor(PROJECT_TYPE.VITE_SOURCE), ...base };
+
+    if (allDeps['react-scripts'])
+      return { type: PROJECT_TYPE.CRA_SOURCE, ...presetFor(PROJECT_TYPE.CRA_SOURCE), ...base };
+
+    if (allDeps['vue'] && (allDeps['@vue/cli-service'] || hasViteConfig))
+      return { type: PROJECT_TYPE.VUE_SOURCE, ...presetFor(PROJECT_TYPE.VUE_SOURCE), ...base };
+
+    // Server detection — Express, Fastify, Hapi, Koa, NestJS
+    const serverDeps = ['express', 'fastify', '@hapi/hapi', 'koa', '@nestjs/core'];
+    const isServer = serverDeps.some(d => allDeps[d]) || scripts.start;
+    const hasNoBuild = !scripts.build;
+    if (isServer && hasNoBuild)
+      return { type: PROJECT_TYPE.NODE_SERVER, ...presetFor(PROJECT_TYPE.NODE_SERVER), ...base };
+
+    // Generic Node project with a build script
+    return { type: PROJECT_TYPE.NODE_SOURCE, ...presetFor(PROJECT_TYPE.NODE_SOURCE), ...base };
+  }
+
+  // No package.json — prebuilt or static
+  if (hasDistIndex) return { type: PROJECT_TYPE.PREBUILT_DIST, ...presetFor(PROJECT_TYPE.PREBUILT_DIST), ...base };
+  if (hasBuildIndex) return { type: PROJECT_TYPE.PREBUILT_BUILD, ...presetFor(PROJECT_TYPE.PREBUILT_BUILD), ...base };
+  if (hasOutIndex) return { type: PROJECT_TYPE.PREBUILT_OUT, ...presetFor(PROJECT_TYPE.PREBUILT_OUT), ...base };
+  if (hasRootIndex) return { type: PROJECT_TYPE.STATIC_ROOT, ...presetFor(PROJECT_TYPE.STATIC_ROOT), ...base };
+  return { type: PROJECT_TYPE.UNKNOWN, ...presetFor(PROJECT_TYPE.UNKNOWN), ...base };
+}
+
+function presetFor(type) {
+  const p = FRAMEWORK_PRESETS[type] || FRAMEWORK_PRESETS[PROJECT_TYPE.UNKNOWN];
+  return { framework: p.framework, detectedBuildCommand: p.buildCommand, detectedOutputDirectory: p.outputDirectory, detectedServiceType: p.serviceType, detectedStartCommand: p.startCommand || null };
 }
 
 function resolvePublishDirectory(detected, userOverride) {
   if (userOverride && String(userOverride).trim()) return String(userOverride).trim();
-  switch (detected.type) {
-    case PROJECT_TYPE.PREBUILT_BUILD: return 'build';
-    case PROJECT_TYPE.PREBUILT_DIST:  return 'dist';
-    default:                          return 'dist';
-  }
+  return detected.detectedOutputDirectory || FRAMEWORK_PRESETS[detected.type]?.outputDirectory || 'dist';
+}
+
+function resolveServiceType(detected, userOverride) {
+  if (userOverride && String(userOverride).trim()) return String(userOverride).trim();
+  return detected.detectedServiceType || FRAMEWORK_PRESETS[detected.type]?.serviceType || 'static_site';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -534,28 +644,71 @@ async function writeRenderShellFile(siteDir, { detected, publishDirectory, reque
   const relativePath = 'glondia-render-build.sh';
   const userBuild = String(requestedBuildCommand || '').trim();
   const buildCmd = userBuild || defaultBuildCommand(detected);
+  const pm = detected.packageManager || 'npm';
+
+  const installCmd = pm === 'pnpm'
+    ? (detected.hasLockFile ? 'pnpm install --frozen-lockfile' : 'pnpm install')
+    : pm === 'yarn'
+      ? (detected.hasLockFile ? 'yarn install --frozen-lockfile' : 'yarn install')
+      : (detected.hasLockFile ? 'npm ci' : 'npm install');
+
+  const runBuild = pm === 'pnpm' ? buildCmd.replace(/^npm run /, 'pnpm run ') : pm === 'yarn' ? buildCmd.replace(/^npm run /, 'yarn ') : buildCmd;
+
+  // Node version setup block — uses .nvmrc, .node-version, or engines.node
+  let nodeSetup = '';
+  if (detected.hasNvmrc || detected.hasNodeVersion || detected.nodeVersion) {
+    nodeSetup = `
+# Auto-detected Node version requirement
+if command -v nvm &>/dev/null; then
+  ${detected.hasNvmrc ? 'nvm install && nvm use' : detected.hasNodeVersion ? 'nvm install $(cat .node-version) && nvm use $(cat .node-version)' : detected.nodeVersion ? `nvm install "${detected.nodeVersion}" && nvm use "${detected.nodeVersion}"` : ''}
+  echo "Node version: $(node --version)"
+elif [ -n "$NODE_VERSION" ]; then
+  echo "Node version set by environment: $NODE_VERSION"
+else
+  echo "Node version: $(node --version) (Render default)"
+fi
+`;
+  }
+
+  // pnpm needs corepack enable on Render
+  let pmSetup = '';
+  if (pm === 'pnpm') {
+    pmSetup = `
+echo "Enabling pnpm via corepack..."
+corepack enable
+corepack prepare pnpm@latest --activate 2>/dev/null || true
+`;
+  } else if (pm === 'yarn') {
+    pmSetup = `
+echo "Ensuring yarn is available..."
+corepack enable 2>/dev/null || true
+`;
+  }
 
   let scriptBody;
+  const isSourceProject = [
+    PROJECT_TYPE.VITE_SOURCE, PROJECT_TYPE.NEXT_SOURCE, PROJECT_TYPE.CRA_SOURCE,
+    PROJECT_TYPE.GATSBY_SOURCE, PROJECT_TYPE.VUE_SOURCE, PROJECT_TYPE.SVELTE_SOURCE,
+    PROJECT_TYPE.ASTRO_SOURCE, PROJECT_TYPE.REMIX_SOURCE, PROJECT_TYPE.NODE_SOURCE,
+    PROJECT_TYPE.NODE_SERVER,
+  ].includes(detected.type);
 
-  switch (detected.type) {
-    case PROJECT_TYPE.VITE_SOURCE:
-    case PROJECT_TYPE.NODE_SOURCE:
-      scriptBody = `
-echo "Source project detected (${detected.framework})"
+  if (isSourceProject) {
+    scriptBody = `
+echo "Source project detected (${detected.framework}, ${pm})"
+${nodeSetup}${pmSetup}
 if [ -f package.json ]; then
-  echo "Installing dependencies..."
-  ${detected.hasLockFile ? 'npm ci' : 'npm install'}
-  echo "Running build: ${buildCmd}"
-  ${buildCmd}
+  echo "Installing dependencies with ${pm}..."
+  ${installCmd}
+  echo "Running build: ${runBuild}"
+  ${runBuild}
 else
   echo "ERROR: package.json expected but not found"
   exit 1
 fi
 `;
-      break;
-
-    case PROJECT_TYPE.STATIC_ROOT:
-      scriptBody = `
+  } else if (detected.type === PROJECT_TYPE.STATIC_ROOT) {
+    scriptBody = `
 echo "Static HTML site detected (no package.json)"
 mkdir -p "${publishDirectory}"
 shopt -s extglob dotglob
@@ -563,10 +716,8 @@ cp -R !("${publishDirectory}"|"glondia-render-build.sh"|"glondia-upload-artifact
 shopt -u dotglob
 echo "Static files copied to ${publishDirectory}/"
 `;
-      break;
-
-    case PROJECT_TYPE.PREBUILT_DIST:
-      scriptBody = `
+  } else if (detected.type === PROJECT_TYPE.PREBUILT_DIST) {
+    scriptBody = `
 echo "Prebuilt site detected in dist/"
 if [ ! -f dist/index.html ]; then
   echo "ERROR: dist/index.html not found"
@@ -574,10 +725,8 @@ if [ ! -f dist/index.html ]; then
 fi
 echo "dist/index.html confirmed — nothing to build"
 `;
-      break;
-
-    case PROJECT_TYPE.PREBUILT_BUILD:
-      scriptBody = `
+  } else if (detected.type === PROJECT_TYPE.PREBUILT_BUILD) {
+    scriptBody = `
 echo "Prebuilt site detected in build/"
 if [ ! -f build/index.html ]; then
   echo "ERROR: build/index.html not found"
@@ -585,10 +734,17 @@ if [ ! -f build/index.html ]; then
 fi
 echo "build/index.html confirmed — nothing to build"
 `;
-      break;
-
-    default:
-      scriptBody = `
+  } else if (detected.type === PROJECT_TYPE.PREBUILT_OUT) {
+    scriptBody = `
+echo "Prebuilt site detected in out/"
+if [ ! -f out/index.html ]; then
+  echo "ERROR: out/index.html not found"
+  exit 1
+fi
+echo "out/index.html confirmed — nothing to build"
+`;
+  } else {
+    scriptBody = `
 echo "Unknown project type — attempting static copy"
 mkdir -p "${publishDirectory}"
 shopt -s extglob dotglob
@@ -603,6 +759,7 @@ set -euo pipefail
 echo "=== Glondia ZIP source artifact build ==="
 echo "Project type: ${detected.type}"
 echo "Framework: ${detected.framework}"
+echo "Package manager: ${pm}"
 echo "Publish directory: ${publishDirectory}"
 ${scriptBody.trim()}
 
@@ -613,8 +770,7 @@ echo "=== Glondia build finished ==="
 }
 
 function defaultBuildCommand(detected) {
-  if (detected.type === PROJECT_TYPE.VITE_SOURCE || detected.type === PROJECT_TYPE.NODE_SOURCE) return 'npm run build';
-  return 'echo "No build step needed"';
+  return detected.detectedBuildCommand || FRAMEWORK_PRESETS[detected.type]?.buildCommand || 'echo "No build step needed"';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

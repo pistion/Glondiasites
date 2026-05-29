@@ -170,9 +170,10 @@ class RenderApiService {
   buildServicePayload(input = {}) {
     const serviceType = input.serviceType || inferServiceType(input);
     const runtime = input.runtime || input.env || 'node';
+    const buildCommand = input.buildCommand || (serviceType === 'static_site' ? 'npm run build' : 'npm install && npm run build');
     const details = serviceType === 'static_site'
       ? {
-          buildCommand: input.buildCommand || 'npm run build',
+          buildCommand,
           publishPath: input.outputDirectory || 'dist',
           pullRequestPreviewsEnabled: 'no',
         }
@@ -186,16 +187,30 @@ class RenderApiService {
             plan: input.plan || 'starter',
             region: input.region || 'oregon',
             envSpecificDetails: {
-              buildCommand: input.buildCommand || 'npm install && npm run build',
+              buildCommand,
               startCommand: input.startCommand || 'npm start',
             },
             ...(input.disk ? { disk: { name: input.disk.name, mountPath: input.disk.mountPath, sizeGB: Number(input.disk.sizeGB || 1) } } : {}),
           };
+
+    const repo = input.repoUrl || input.repositoryUrl || input.sourceReference;
+    const name = renderSafeName(input.serviceName || input.name || input.slug || 'glondia-site');
+
+    // Pre-flight: catch bad configs before they hit Render
+    if (!repo) {
+      const err = new Error('Cannot create Render service without a source repository URL.');
+      err.status = 400; err.code = 'RENDER_MISSING_REPO'; err.expose = true;
+      throw err;
+    }
+    if (!name || name === 'glondia-site' && !input.serviceName) {
+      console.warn('[render-api] Service name is generic — consider providing a specific serviceName.');
+    }
+
     return {
       type: serviceType,
-      name: renderSafeName(input.serviceName || input.name || input.slug || 'glondia-site'),
+      name,
       ownerId: input.ownerId || process.env.RENDER_OWNER_ID,
-      repo: input.repoUrl || input.repositoryUrl || input.sourceReference,
+      repo,
       branch: input.branch || input.productionBranch || 'main',
       rootDir: input.rootDirectory || undefined,
       serviceDetails: details,
@@ -225,9 +240,11 @@ class RenderApiService {
 }
 
 function inferServiceType(input = {}) {
-  return input.startCommand || input.framework === 'Express' || input.framework === 'Node'
-    ? 'web_service'
-    : 'static_site';
+  if (input.startCommand) return 'web_service';
+  const fw = String(input.framework || '').toLowerCase();
+  const serverFrameworks = ['express', 'node', 'node.js server', 'fastify', 'koa', 'hapi', 'nestjs', 'next.js', 'remix', 'sveltekit'];
+  if (serverFrameworks.some(s => fw.includes(s))) return 'web_service';
+  return 'static_site';
 }
 
 function renderSafeName(value) {
