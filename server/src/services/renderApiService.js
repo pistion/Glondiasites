@@ -15,6 +15,8 @@ class RenderApiService {
     };
   }
 
+  // ── Core CRUD ────────────────────────────────────────────────────────────────
+
   async createService(input = {}) {
     this.assertConfigured('create_service');
     const body = this.buildServicePayload(input);
@@ -41,6 +43,8 @@ class RenderApiService {
     return this.request(`/services/${encodeURIComponent(serviceId)}`, { method: 'DELETE' });
   }
 
+  // ── Deploys ──────────────────────────────────────────────────────────────────
+
   async triggerDeploy(serviceId, input = {}) {
     this.assertConfigured('trigger_deploy');
     return this.request(`/services/${encodeURIComponent(serviceId)}/deploys`, {
@@ -63,8 +67,6 @@ class RenderApiService {
     return this.request(`/services/${encodeURIComponent(serviceId)}/deploys?limit=${encodeURIComponent(limit)}`);
   }
 
-  // Fetch deploy log lines. Returns { logs: [{ id, message, timestamp, type }] }
-  // cursor is the id of the last log line seen; pass it to get only new lines.
   async getDeployLogs(serviceId, deployId, cursor = null) {
     this.assertConfigured('get_deploy_logs');
     const params = new URLSearchParams({ limit: '200' });
@@ -73,6 +75,8 @@ class RenderApiService {
       `/services/${encodeURIComponent(serviceId)}/deploys/${encodeURIComponent(deployId)}/logs?${params}`
     );
   }
+
+  // ── Env Vars ─────────────────────────────────────────────────────────────────
 
   async listEnvVars(serviceId) {
     this.assertConfigured('list_env_vars');
@@ -95,6 +99,8 @@ class RenderApiService {
     this.assertConfigured('delete_env_var');
     return this.request(`/services/${encodeURIComponent(serviceId)}/env-vars/${encodeURIComponent(key)}`, { method: 'DELETE' });
   }
+
+  // ── Disks ────────────────────────────────────────────────────────────────────
 
   async createDisk(serviceId, disk = {}) {
     this.assertConfigured('create_disk');
@@ -121,6 +127,8 @@ class RenderApiService {
     return this.request(`/services/${encodeURIComponent(serviceId)}/disks/${encodeURIComponent(diskId)}`, { method: 'DELETE' });
   }
 
+  // ── Custom Domains ───────────────────────────────────────────────────────────
+
   async addCustomDomain(serviceId, domainName) {
     this.assertConfigured('add_custom_domain');
     return this.request(`/services/${encodeURIComponent(serviceId)}/custom-domains`, {
@@ -144,9 +152,109 @@ class RenderApiService {
     return this.request(`/services/${encodeURIComponent(serviceId)}/custom-domains/${encodeURIComponent(domainId)}`, { method: 'DELETE' });
   }
 
+  // ── High-Level Settings Updates ──────────────────────────────────────────────
+
+  /**
+   * Update static site settings (build command, publish path, PR previews, etc.)
+   */
+  async updateStaticSiteSettings(serviceId, input = {}) {
+    this.assertConfigured('update_static_site_settings');
+    const payload = buildStaticSiteUpdatePayload(input);
+    return this.updateService(serviceId, payload);
+  }
+
+  /**
+   * Update web service settings (build/start commands, runtime, plan, region, etc.)
+   */
+  async updateWebServiceSettings(serviceId, input = {}) {
+    this.assertConfigured('update_web_service_settings');
+    const payload = buildWebServiceUpdatePayload(input);
+    return this.updateService(serviceId, payload);
+  }
+
+  /**
+   * Update source settings (repo URL, branch, root directory).
+   */
+  async updateSourceSettings(serviceId, input = {}) {
+    this.assertConfigured('update_source_settings');
+    const payload = buildSourceUpdatePayload(input);
+    return this.updateService(serviceId, payload);
+  }
+
+  /**
+   * Update build settings — auto-routes to static or web service update
+   * based on serviceType or framework inference.
+   */
+  async updateBuildSettings(serviceId, input = {}) {
+    this.assertConfigured('update_build_settings');
+    const serviceType = input.serviceType || inferServiceType(input);
+
+    if (serviceType === 'static_site') {
+      return this.updateStaticSiteSettings(serviceId, {
+        buildCommand: input.buildCommand,
+        publishDirectory: input.publishDirectory || input.outputDirectory,
+      });
+    }
+
+    return this.updateWebServiceSettings(serviceId, {
+      buildCommand: input.buildCommand,
+      startCommand: input.startCommand,
+      runtime: input.runtime || input.env,
+    });
+  }
+
+  /**
+   * Save settings then trigger a fresh deploy in one call.
+   * Supports "Save & Redeploy" button workflow.
+   */
+  async redeployWithSettings(serviceId, input = {}) {
+    this.assertConfigured('redeploy_with_settings');
+    const serviceType = input.serviceType || inferServiceType(input);
+
+    if (serviceType === 'static_site') {
+      await this.updateStaticSiteSettings(serviceId, input);
+    } else {
+      await this.updateWebServiceSettings(serviceId, input);
+    }
+
+    return this.triggerDeploy(serviceId, {
+      clearCache: normalizeClearCache(input.clearCache),
+      deployMode: input.deployMode || 'build_and_deploy',
+      ...(input.commitId ? { commitId: input.commitId } : {}),
+    });
+  }
+
+  /**
+   * Full Render snapshot for sync — service details, latest deploy,
+   * env vars metadata, and custom domains in a single call.
+   * Backend-only: controllers must strip secret env var values before
+   * sending to the browser.
+   */
+  async getServiceSnapshot(serviceId) {
+    this.assertConfigured('get_service_snapshot');
+
+    const [service, deploys, envVars, domains] = await Promise.all([
+      this.getService(serviceId),
+      this.listDeploys(serviceId, 1).catch((error) => ({ error: error.message || 'Could not list deploys.' })),
+      this.listEnvVars(serviceId).catch((error) => ({ error: error.message || 'Could not list env vars.' })),
+      this.listCustomDomains(serviceId).catch((error) => ({ error: error.message || 'Could not list custom domains.' })),
+    ]);
+
+    return {
+      service,
+      latestDeploy: extractFirstDeploy(deploys),
+      envVars,
+      domains,
+      syncedAt: new Date().toISOString(),
+    };
+  }
+
+  // ── HTTP Transport ───────────────────────────────────────────────────────────
+
   async request(path, options = {}) {
+    const method = options.method || 'GET';
     const response = await fetch(`${RENDER_BASE_URL}${path}`, {
-      method: options.method || 'GET',
+      method,
       headers: {
         Authorization: `Bearer ${process.env.RENDER_API_KEY}`,
         Accept: 'application/json',
@@ -158,24 +266,34 @@ class RenderApiService {
     let body = {};
     try { body = text ? JSON.parse(text) : {}; } catch { body = { raw: text }; }
     if (!response.ok) {
-      const error = new Error(body?.message || body?.error || `Render API returned ${response.status}.`);
+      const errorMessage =
+        body?.message ||
+        body?.error ||
+        body?.errors?.[0]?.message ||
+        `Render API returned ${response.status}.`;
+      const error = new Error(errorMessage);
       error.status = response.status === 401 ? 401 : response.status >= 500 ? 502 : response.status;
       error.details = body;
       error.expose = true;
+      error.renderPath = path;
+      error.renderMethod = method;
       throw error;
     }
     return body;
   }
 
+  // ── Payload Builder ──────────────────────────────────────────────────────────
+
   buildServicePayload(input = {}) {
     const serviceType = input.serviceType || inferServiceType(input);
     const runtime = input.runtime || input.env || 'node';
     const buildCommand = input.buildCommand || (serviceType === 'static_site' ? 'npm run build' : 'npm install && npm run build');
+
     const details = serviceType === 'static_site'
       ? {
           buildCommand,
-          publishPath: input.outputDirectory || 'dist',
-          pullRequestPreviewsEnabled: 'no',
+          publishPath: input.outputDirectory || input.publishDirectory || 'dist',
+          pullRequestPreviewsEnabled: input.pullRequestPreviewsEnabled || 'no',
         }
       : serviceType === 'docker'
         ? {
@@ -196,17 +314,16 @@ class RenderApiService {
     const repo = input.repoUrl || input.repositoryUrl || input.sourceReference;
     const name = renderSafeName(input.serviceName || input.name || input.slug || 'glondia-site');
 
-    // Pre-flight: catch bad configs before they hit Render
     if (!repo) {
       const err = new Error('Cannot create Render service without a source repository URL.');
       err.status = 400; err.code = 'RENDER_MISSING_REPO'; err.expose = true;
       throw err;
     }
-    if (!name || name === 'glondia-site' && !input.serviceName) {
+    if (name === 'glondia-site' && !input.serviceName) {
       console.warn('[render-api] Service name is generic — consider providing a specific serviceName.');
     }
 
-    return {
+    return cleanObject({
       type: serviceType,
       name,
       ownerId: input.ownerId || process.env.RENDER_OWNER_ID,
@@ -215,8 +332,10 @@ class RenderApiService {
       rootDir: input.rootDirectory || undefined,
       serviceDetails: details,
       envVars: input.envVars || undefined,
-    };
+    });
   }
+
+  // ── Auth Guard ───────────────────────────────────────────────────────────────
 
   assertConfigured(action = 'render_api') {
     if (this.configured()) return;
@@ -239,6 +358,8 @@ class RenderApiService {
   }
 }
 
+// ── Helpers: Service Type Inference ──────────────────────────────────────────
+
 function inferServiceType(input = {}) {
   if (input.startCommand) return 'web_service';
   const fw = String(input.framework || '').toLowerCase();
@@ -249,6 +370,161 @@ function inferServiceType(input = {}) {
 
 function renderSafeName(value) {
   return String(value || 'glondia-site').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'glondia-site';
+}
+
+// ── Helpers: Settings Update Payloads ───────────────────────────────────────
+
+function buildStaticSiteUpdatePayload(input = {}) {
+  return cleanObject({
+    ...(input.name || input.serviceName
+      ? { name: renderSafeName(input.name || input.serviceName) }
+      : {}),
+
+    ...(input.branch
+      ? { branch: input.branch }
+      : {}),
+
+    ...(input.rootDirectory !== undefined
+      ? { rootDir: input.rootDirectory || undefined }
+      : {}),
+
+    serviceDetails: {
+      ...(input.buildCommand !== undefined
+        ? { buildCommand: input.buildCommand }
+        : {}),
+
+      ...(input.publishDirectory !== undefined || input.outputDirectory !== undefined
+        ? { publishPath: input.publishDirectory || input.outputDirectory }
+        : {}),
+
+      ...(input.pullRequestPreviewsEnabled !== undefined
+        ? { pullRequestPreviewsEnabled: input.pullRequestPreviewsEnabled }
+        : {}),
+    },
+  });
+}
+
+function buildWebServiceUpdatePayload(input = {}) {
+  return cleanObject({
+    ...(input.name || input.serviceName
+      ? { name: renderSafeName(input.name || input.serviceName) }
+      : {}),
+
+    ...(input.branch
+      ? { branch: input.branch }
+      : {}),
+
+    ...(input.rootDirectory !== undefined
+      ? { rootDir: input.rootDirectory || undefined }
+      : {}),
+
+    serviceDetails: {
+      ...(input.runtime || input.env
+        ? { env: input.runtime || input.env }
+        : {}),
+
+      ...(input.plan
+        ? { plan: input.plan }
+        : {}),
+
+      ...(input.region
+        ? { region: input.region }
+        : {}),
+
+      envSpecificDetails: {
+        ...(input.buildCommand !== undefined
+          ? { buildCommand: input.buildCommand }
+          : {}),
+
+        ...(input.startCommand !== undefined
+          ? { startCommand: input.startCommand }
+          : {}),
+      },
+    },
+  });
+}
+
+function buildSourceUpdatePayload(input = {}) {
+  return cleanObject({
+    ...(input.repoUrl || input.repositoryUrl || input.repo
+      ? { repo: input.repoUrl || input.repositoryUrl || input.repo }
+      : {}),
+
+    ...(input.branch
+      ? { branch: input.branch }
+      : {}),
+
+    ...(input.rootDirectory !== undefined
+      ? { rootDir: input.rootDirectory || undefined }
+      : {}),
+  });
+}
+
+// ── Helpers: Utilities ──────────────────────────────────────────────────────
+
+/**
+ * Recursively strip empty strings, null values, and empty nested objects
+ * so Render never receives blank or structurally empty payload fields.
+ */
+function cleanObject(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => cleanObject(item))
+      .filter((item) => item !== undefined);
+  }
+
+  if (value && typeof value === 'object') {
+    const output = {};
+
+    for (const [key, child] of Object.entries(value)) {
+      const cleaned = cleanObject(child);
+
+      if (
+        cleaned !== undefined &&
+        cleaned !== null &&
+        !(
+          typeof cleaned === 'object' &&
+          !Array.isArray(cleaned) &&
+          Object.keys(cleaned).length === 0
+        )
+      ) {
+        output[key] = cleaned;
+      }
+    }
+
+    return output;
+  }
+
+  if (value === '') return undefined;
+  return value;
+}
+
+function normalizeClearCache(value) {
+  if (value === true) return 'clear';
+  if (value === false || value === undefined || value === null) return 'do_not_clear';
+  if (value === 'clear' || value === 'do_not_clear') return value;
+  return 'do_not_clear';
+}
+
+function extractFirstDeploy(deploysResponse) {
+  if (!deploysResponse || deploysResponse.error) return null;
+
+  if (Array.isArray(deploysResponse)) {
+    const first = deploysResponse[0] || null;
+    return first?.deploy || first;
+  }
+
+  if (Array.isArray(deploysResponse.deploys)) {
+    const first = deploysResponse.deploys[0] || null;
+    return first?.deploy || first;
+  }
+
+  if (Array.isArray(deploysResponse.data)) {
+    const first = deploysResponse.data[0] || null;
+    return first?.deploy || first;
+  }
+
+  return deploysResponse.deploy || null;
 }
 
 export default new RenderApiService();

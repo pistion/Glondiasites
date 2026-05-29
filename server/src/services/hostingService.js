@@ -54,8 +54,8 @@ class HostingService {
     if (!renderApiService.configured() || !hasRealRenderId(deployment.renderServiceId) || deployment.status === REMOVED) return deployment;
     try {
       await deploymentStatusService.refreshDeployment(deployment);
-      const serviceResponse = await renderApiService.getService(deployment.renderServiceId);
-      const service = serviceResponse?.service || serviceResponse;
+      const snapshot = await renderApiService.getServiceSnapshot(deployment.renderServiceId);
+      const service = snapshot?.service?.service || snapshot?.service;
       return mutateHostingStore((nextStore) => {
         const stored = nextStore.deployments.find((item) => item.deploymentId === deployment.deploymentId);
         if (!stored) return deployment;
@@ -69,6 +69,7 @@ class HostingService {
         const liveUrl = service?.serviceDetails?.url || service?.url || stored.liveUrl;
         stored.liveUrl = liveUrl || stored.liveUrl;
         stored.renderService = service;
+        stored.renderSnapshot = { latestDeploy: snapshot.latestDeploy, syncedAt: snapshot.syncedAt };
         stored.lastRenderSyncedAt = nowIso();
         stored.updatedAt = nowIso();
         if (previous !== stored.status) addLog(nextStore, stored.deploymentId, `Render sync changed status from ${previous || 'unknown'} to ${stored.status}.`, 'info');
@@ -83,22 +84,51 @@ class HostingService {
 
   /**
    * Update deployment settings and push changes to Render.
-   * Transforms local form fields into Render API format.
+   * Uses the typed update methods in renderApiService for clean payloads.
    */
   async updateSettings(deploymentId, settings = {}) {
     const current = await this.getService(deploymentId);
     const hasReal = current.renderServiceId && !String(current.renderServiceId).includes('_pending');
     if (!hasReal) throw conflict('Render deployment has not started. A real Render service ID is required.');
 
-    // Extract the settings payload (may be nested under .render from frontend)
     const incoming = settings.render || settings;
+    const serviceType = incoming.serviceType || current.serviceType || 'static_site';
 
-    // Build Render-compatible PATCH body
-    const renderPatch = buildRenderPatchPayload(incoming, current);
-
+    // Push settings to Render via typed update methods
     let renderSettings = null;
-    if (Object.keys(renderPatch).length > 0) {
-      renderSettings = await renderApiService.updateService(current.renderServiceId, renderPatch);
+    const hasSourceChanges = incoming.sourceRepository || incoming.branch || incoming.rootDirectory !== undefined;
+    const hasBuildChanges = incoming.buildCommand !== undefined || incoming.outputDirectory !== undefined || incoming.startCommand !== undefined;
+
+    if (hasSourceChanges) {
+      renderSettings = await renderApiService.updateSourceSettings(current.renderServiceId, {
+        repoUrl: incoming.sourceRepository,
+        branch: incoming.branch,
+        rootDirectory: incoming.rootDirectory,
+      });
+    }
+    if (hasBuildChanges) {
+      renderSettings = await renderApiService.updateBuildSettings(current.renderServiceId, {
+        serviceType,
+        buildCommand: incoming.buildCommand,
+        publishDirectory: incoming.outputDirectory,
+        startCommand: incoming.startCommand,
+        runtime: incoming.runtime || incoming.env,
+      });
+    }
+    // Remaining fields (name, plan, region) go through typed methods
+    if (incoming.plan || incoming.region || incoming.serviceName) {
+      if (serviceType === 'static_site') {
+        renderSettings = await renderApiService.updateStaticSiteSettings(current.renderServiceId, {
+          serviceName: incoming.serviceName,
+          pullRequestPreviewsEnabled: incoming.pullRequestPreviewsEnabled,
+        });
+      } else {
+        renderSettings = await renderApiService.updateWebServiceSettings(current.renderServiceId, {
+          serviceName: incoming.serviceName,
+          plan: incoming.plan,
+          region: incoming.region,
+        });
+      }
     }
 
     return mutateHostingStore((store) => {
@@ -240,34 +270,5 @@ function addLog(store, deploymentId, message, level = 'info') {
 function notFound(message) { const error = new Error(message); error.status = 404; return error; }
 function conflict(message) { const error = new Error(message); error.status = 409; return error; }
 function isRenderGone(error) { return error?.status === 404 || error?.status === 410; }
-
-/**
- * Transform local settings form fields into Render API PATCH format.
- * Render's PATCH /services/:id expects specific field names and nested serviceDetails.
- */
-function buildRenderPatchPayload(incoming = {}, current = {}) {
-  const patch = {};
-  const isStatic = (incoming.serviceType || current.serviceType) === 'static_site';
-
-  if (incoming.branch) patch.branch = incoming.branch;
-  if (incoming.rootDirectory !== undefined) patch.rootDir = incoming.rootDirectory || undefined;
-  if (incoming.sourceRepository) patch.repo = incoming.sourceRepository;
-
-  // Service details depend on type
-  const details = {};
-  if (isStatic) {
-    if (incoming.buildCommand !== undefined) details.buildCommand = incoming.buildCommand;
-    if (incoming.outputDirectory !== undefined) details.publishPath = incoming.outputDirectory;
-  } else {
-    if (incoming.plan) details.plan = incoming.plan;
-    const envDetails = {};
-    if (incoming.buildCommand !== undefined) envDetails.buildCommand = incoming.buildCommand;
-    if (incoming.startCommand !== undefined) envDetails.startCommand = incoming.startCommand;
-    if (Object.keys(envDetails).length > 0) details.envSpecificDetails = envDetails;
-  }
-  if (Object.keys(details).length > 0) patch.serviceDetails = details;
-
-  return patch;
-}
 
 export default new HostingService();
