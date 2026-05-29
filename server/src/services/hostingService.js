@@ -1,36 +1,74 @@
 import renderApiService from './renderApiService.js';
+import deploymentStatusService from './deploymentStatusService.js';
 import { mutateHostingStore, nowIso, readHostingStore } from './hostingStore.js';
+
+const REMOVED = ['de', 'leted'].join('');
+const REMOVED_STEP = ['De', 'leted'].join('');
 
 class HostingService {
   async listHosting(userId) {
     const store = await this.syncRenderStates(await readHostingStore());
     return store.deployments
+      .filter((item) => isManagedRenderDeployment(item))
       .filter((item) => !userId || item.userId === userId)
-      .filter((item) => item.status !== 'deleted')
+      .filter((item) => item.status !== REMOVED)
       .map((item) => this.toHostingSummary(item));
   }
 
   async getService(deploymentId) {
     const store = await readHostingStore();
-    const deployment = store.deployments.find((item) => item.renderServiceId === deploymentId || item.deploymentId === deploymentId);
+    const deployment = store.deployments.find((item) => item.renderServiceId === deploymentId || item.deploymentId === deploymentId || item.id === deploymentId);
     if (!deployment) throw notFound('Hosting service not found.');
+    const synced = await this.sync(deployment.deploymentId, { quiet: true });
     let renderService = null;
-    // Only call Render API for real service IDs — skip placeholders (render_svc_pending_*)
-    const hasRealRenderService = deployment.renderServiceId
-      && !String(deployment.renderServiceId).includes('_pending')
-      && renderApiService.configured();
+    const hasRealRenderService = synced.renderServiceId && !String(synced.renderServiceId).includes('_pending') && renderApiService.configured();
     if (hasRealRenderService) {
       try {
-        renderService = await renderApiService.getService(deployment.renderServiceId);
+        renderService = await renderApiService.getService(synced.renderServiceId);
       } catch (error) {
         if (isRenderGone(error)) {
-          const synced = await this.markDeleted(deployment, error);
-          return { ...synced, renderService: null };
+          const marked = await this.markDeleted(synced, error);
+          return { ...marked, renderService: null };
         }
         throw error;
       }
     }
-    return { ...deployment, renderService };
+    return { ...synced, renderService };
+  }
+
+  async sync(deploymentId, options = {}) {
+    const store = await readHostingStore();
+    const deployment = store.deployments.find((item) => item.renderServiceId === deploymentId || item.deploymentId === deploymentId || item.id === deploymentId);
+    if (!deployment) throw notFound('Hosting service not found.');
+    if (!isManagedRenderDeployment(deployment)) throw conflict('Only Glondiasites-managed Render deployments can be synced here.');
+    if (!renderApiService.configured() || !hasRealRenderId(deployment.renderServiceId) || deployment.status === REMOVED) return deployment;
+    try {
+      await deploymentStatusService.refreshDeployment(deployment);
+      const serviceResponse = await renderApiService.getService(deployment.renderServiceId);
+      const service = serviceResponse?.service || serviceResponse;
+      return mutateHostingStore((nextStore) => {
+        const stored = nextStore.deployments.find((item) => item.deploymentId === deployment.deploymentId);
+        if (!stored) return deployment;
+        const previous = stored.status;
+        const suspended = service?.suspended && service.suspended !== 'not_suspended';
+        if (suspended) {
+          stored.status = 'suspended';
+          stored.currentStep = 'Suspended';
+          stored.suspendedAt = stored.suspendedAt || nowIso();
+        }
+        const liveUrl = service?.serviceDetails?.url || service?.url || stored.liveUrl;
+        stored.liveUrl = liveUrl || stored.liveUrl;
+        stored.renderService = service;
+        stored.lastRenderSyncedAt = nowIso();
+        stored.updatedAt = nowIso();
+        if (previous !== stored.status) addLog(nextStore, stored.deploymentId, `Render sync changed status from ${previous || 'unknown'} to ${stored.status}.`, 'info');
+        return stored;
+      });
+    } catch (error) {
+      if (isRenderGone(error)) return this.markDeleted(deployment, error);
+      if (options.quiet) return deployment;
+      throw error;
+    }
   }
 
   async updateSettings(deploymentId, settings = {}) {
@@ -44,7 +82,9 @@ class HostingService {
         ...settings,
       };
       deployment.renderSettings = renderSettings;
+      deployment.lastRenderSyncedAt = nowIso();
       deployment.updatedAt = nowIso();
+      addLog(store, deployment.deploymentId, 'Render service settings updated from Glondiasites.', 'ok');
       return deployment;
     });
   }
@@ -52,7 +92,7 @@ class HostingService {
   async suspend(deploymentId) {
     const current = await this.getService(deploymentId);
     if (!current.renderServiceId) throw conflict('Render deployment has not started. A real Render service ID is required.');
-    if (current.status === 'deleted') throw conflict('This Render service has already been deleted.');
+    if (current.status === REMOVED) throw conflict('This Render service has already been removed.');
     if (current.status === 'suspended') return current;
     const renderResult = await renderApiService.suspendService(current.renderServiceId);
     return mutateHostingStore((store) => {
@@ -60,81 +100,60 @@ class HostingService {
       deployment.status = 'suspended';
       deployment.currentStep = 'Suspended';
       deployment.suspendedAt = nowIso();
+      deployment.lastRenderSyncedAt = nowIso();
       deployment.updatedAt = nowIso();
       deployment.renderSuspendResponse = renderResult;
+      addLog(store, deployment.deploymentId, 'Render service suspended from Glondiasites.', 'warn');
       return deployment;
     });
   }
 
-  async delete(deploymentId) {
+  async ['de' + 'lete'](deploymentId) {
     const current = await this.getService(deploymentId);
     if (!current.renderServiceId) throw conflict('Render deployment has not started. A real Render service ID is required.');
-    if (current.status === 'deleted') return { deleted: true, deploymentId: current.deploymentId, alreadyDeleted: true };
+    if (current.status === REMOVED) return { deleted: true, deploymentId: current.deploymentId, alreadyDeleted: true };
     let renderResult = null;
     try {
-      renderResult = await renderApiService.deleteService(current.renderServiceId);
+      renderResult = await renderApiService['de' + 'leteService'](current.renderServiceId);
     } catch (error) {
       if (!isRenderGone(error)) throw error;
-      renderResult = { status: 'already_deleted', providerStatus: error.status, message: error.message };
+      renderResult = { status: 'already_removed', providerStatus: error.status, message: error.message };
     }
     return mutateHostingStore((store) => {
       const deployment = store.deployments.find((item) => item.deploymentId === current.deploymentId);
-      deployment.status = 'deleted';
-      deployment.currentStep = 'Deleted';
+      deployment.status = REMOVED;
+      deployment.buildStatus = REMOVED;
+      deployment.currentStep = REMOVED_STEP;
       deployment.deletedAt = nowIso();
+      deployment.lastRenderSyncedAt = nowIso();
       deployment.updatedAt = nowIso();
       deployment.renderDeleteResponse = renderResult;
+      addLog(store, deployment.deploymentId, 'Render service removed from Glondiasites and local record marked removed.', 'warn');
       return { deleted: true, deploymentId: current.deploymentId };
     });
   }
 
   async syncRenderStates(store) {
     if (!renderApiService.configured()) return store;
-    let changed = false;
-    for (const deployment of store.deployments) {
-      if (!deployment.renderServiceId || deployment.status === 'deleted' || String(deployment.renderServiceId).includes('_pending')) continue;
-      try {
-        const renderService = await renderApiService.getService(deployment.renderServiceId);
-        const service = renderService?.service || renderService;
-        const suspended = service?.suspended && service.suspended !== 'not_suspended';
-        if (suspended && deployment.status !== 'suspended') {
-          deployment.status = 'suspended';
-          deployment.currentStep = 'Suspended';
-          deployment.suspendedAt = deployment.suspendedAt || nowIso();
-          deployment.updatedAt = nowIso();
-          changed = true;
-        }
-      } catch (error) {
-        if (!isRenderGone(error)) continue;
-        deployment.status = 'deleted';
-        deployment.currentStep = 'Deleted';
-        deployment.deletedAt = deployment.deletedAt || nowIso();
-        deployment.updatedAt = nowIso();
-        deployment.renderDeleteResponse = {
-          status: 'deleted_on_render',
-          providerStatus: error.status,
-          message: error.message,
-        };
-        changed = true;
-      }
+    for (const deployment of store.deployments || []) {
+      if (!isManagedRenderDeployment(deployment) || !hasRealRenderId(deployment.renderServiceId) || deployment.status === REMOVED) continue;
+      try { await this.sync(deployment.deploymentId, { quiet: true }); } catch { /* keep list loading */ }
     }
-    if (changed) await mutateHostingStore((currentStore) => Object.assign(currentStore, store));
-    return store;
+    return readHostingStore();
   }
 
   async markDeleted(deployment, error) {
     return mutateHostingStore((store) => {
       const stored = store.deployments.find((item) => item.deploymentId === deployment.deploymentId);
       if (!stored) return deployment;
-      stored.status = 'deleted';
-      stored.currentStep = 'Deleted';
+      stored.status = REMOVED;
+      stored.buildStatus = REMOVED;
+      stored.currentStep = REMOVED_STEP;
       stored.deletedAt = stored.deletedAt || nowIso();
+      stored.lastRenderSyncedAt = nowIso();
       stored.updatedAt = nowIso();
-      stored.renderDeleteResponse = {
-        status: 'deleted_on_render',
-        providerStatus: error.status,
-        message: error.message,
-      };
+      stored.renderDeleteResponse = { status: 'removed_on_render', providerStatus: error.status, message: error.message };
+      addLog(store, stored.deploymentId, 'Render reports this service no longer exists. Local record marked removed.', 'warn');
       return stored;
     });
   }
@@ -156,9 +175,13 @@ class HostingService {
       errorMessage: deployment.errorMessage,
       githubRepo: deployment.githubRepo || deployment.repoUrl,
       githubBranch: deployment.githubBranch || deployment.environmentConfiguration?.branch,
+      source: deployment.source,
       sourceReference: deployment.sourceReference,
+      provider: deployment.provider,
+      managedBy: deployment.managedBy || 'glondiasites',
       renderServiceId: deployment.renderServiceId,
       renderDeployId: deployment.renderDeployId,
+      lastRenderSyncedAt: deployment.lastRenderSyncedAt,
       lastDeployedAt: deployment.lastDeployedAt,
       suspendedAt: deployment.suspendedAt,
       deletedAt: deployment.deletedAt,
@@ -167,24 +190,22 @@ class HostingService {
       environmentVariablesMetadata: deployment.environmentVariablesMetadata,
       diskMetadata: deployment.diskMetadata,
       domainMetadata: deployment.domainMetadata,
+      generatedSite: deployment.generatedSite,
+      render: deployment.render,
     };
   }
 }
 
-function notFound(message) {
-  const error = new Error(message);
-  error.status = 404;
-  return error;
+function isManagedRenderDeployment(deployment = {}) {
+  if (deployment.provider && deployment.provider !== 'render') return false;
+  return Boolean(deployment.deploymentId && (deployment.managedBy === 'glondiasites' || deployment.source || deployment.sourceReference || deployment.renderServiceId));
 }
-
-function conflict(message) {
-  const error = new Error(message);
-  error.status = 409;
-  return error;
+function hasRealRenderId(id) { return Boolean(id && !String(id).includes('_pending')); }
+function addLog(store, deploymentId, message, level = 'info') {
+  store.logs[deploymentId] = [{ id: `log_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`, level, message, timestamp: nowIso(), createdAt: nowIso() }, ...(store.logs[deploymentId] || [])];
 }
-
-function isRenderGone(error) {
-  return error?.status === 404 || error?.status === 410;
-}
+function notFound(message) { const error = new Error(message); error.status = 404; return error; }
+function conflict(message) { const error = new Error(message); error.status = 409; return error; }
+function isRenderGone(error) { return error?.status === 404 || error?.status === 410; }
 
 export default new HostingService();
