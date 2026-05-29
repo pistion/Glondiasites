@@ -274,6 +274,18 @@ export async function deleteDomain(domainId) { return domainApi.deleteDomain(dom
 export async function createDnsRecord(domainId, input) { return domainApi.createDnsRecord(domainId, input); }
 export async function updateDnsRecord(domainId, recordId, input) { return domainApi.updateDnsRecord(domainId, recordId, input); }
 export async function deleteDnsRecord(domainId, recordId) { return domainApi.deleteDnsRecord(domainId, recordId); }
+export async function listSslCertificates(domainId) { return domainApi.listSslCertificates(domainId); }
+export async function aiEditBuilderPage(html, prompt, pagePath) {
+  return apiRequest('/template-ai/edit-page', { method: 'POST', body: JSON.stringify({ html, prompt, pagePath }) });
+}
+export async function verifyDomain(domainId) { return domainApi.verifyDomain(domainId); }
+export async function exportZoneFile(domainId) { return domainApi.exportZoneFile(domainId); }
+export async function importZoneFile(domainId, content, overwrite) { return domainApi.importZoneFile(domainId, content, overwrite); }
+export async function bulkDeleteDnsRecords(domainId, recordIds) { return domainApi.bulkDeleteDnsRecords(domainId, recordIds); }
+export async function updateNameservers(name, provider, hosts) { return domainApi.updateNameservers(name, provider, hosts); }
+export async function pushDnsToSpaceship(domainId) { return domainApi.pushDnsToSpaceship(domainId); }
+export async function pullDnsFromSpaceship(domainId) { return domainApi.pullDnsFromSpaceship(domainId); }
+export async function getRegistrarOperation(operationId) { return domainApi.getRegistrarOperation(operationId); }
 
 export const {
   createProject: createBuilderProject,
@@ -290,6 +302,10 @@ export const {
   publishBuilderSite,
   importBuilderSiteFromGithub,
   getBuilderPreviewUrl,
+  saveBuilderPage,
+  createBuilderPage,
+  deleteBuilderPage,
+  listBuilderPages,
 } = builderApi;
 
 export const {
